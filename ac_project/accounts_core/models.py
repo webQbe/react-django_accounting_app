@@ -74,7 +74,6 @@ class Company(models.Model):
 
 
 # ---------- Chart of Accounts ----------
-
 class AccountCategory(models.Model): # For organizing accounts into categories
     company = models.ForeignKey(Company, on_delete=models.CASCADE) # each company has its own set of categories (multi-tenant safe)
     name = models.CharField(max_length=100) # category’s label (e.g. "Current Assets")
@@ -84,7 +83,6 @@ class AccountCategory(models.Model): # For organizing accounts into categories
 
     def __str__(self):
         return f"{self.company.slug} - {self.name}" # Example: "acme - Current Assets"
-
 
 class Account(models.Model): # Actual ledger account entry in Chart of Accounts
     """
@@ -139,3 +137,39 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
         # Make accounts readable in the Django admin and debugging
         return f"{self.company.slug}:{self.code} – {self.name}" 
         # Example: "acme:1000 – Cash on Hand".
+    
+
+# ---------- Period (accounting period) ----------
+class Period(models.Model): # Each Period represents a time bucket during which financial transactions are grouped
+   
+    # Every company has its own independent calendar of periods
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    """ 
+        Tenant isolation: 
+        "Company A" can close July while "Company B" is still open. 
+    """
+
+    # Human-readable label for the period
+    name = models.CharField(max_length=50)  # Example: "2025-Q3" or "FY2025-01"
+
+    # Define the exact date range of the accounting period
+    start_date = models.DateField()
+    end_date = models.DateField()
+
+    # Indicate whether the books for this period are closed
+    is_closed = models.BooleanField(default=False)
+    """ 
+        When is_closed=True:
+            No new postings allowed.
+            Prevents backdating transactions that could corrupt finalized reports.
+    """
+
+    class Meta:
+        # Prevent duplicate period names inside the same company
+        unique_together = ("company", "name") # E.g., "2025-07" can exist once per company
+        
+        # Default query ordering: periods are returned sorted by company, then chronologically
+        ordering = ("company", "start_date") # no need to sort manually
+
+    def __str__(self):
+        return f"{self.company.slug} {self.name}" # Example: "acme 2025-07".
