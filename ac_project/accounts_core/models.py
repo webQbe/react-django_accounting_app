@@ -173,3 +173,76 @@ class Period(models.Model): # Each Period represents a time bucket during which 
 
     def __str__(self):
         return f"{self.company.slug} {self.name}" # Example: "acme 2025-07".
+
+
+# ---------- Customers & Vendors ----------
+class Customer(models.Model): # Represents client who receives invoices (AR side)
+
+    # Multi-tenant: every customer belongs to a single company.
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    """ Example: 
+        Acme Ltd (Company A) can have its own customers separate from Beta Inc (Company B). 
+    """
+
+    # The customer’s legal or trade name
+    name = models.CharField(max_length=200)
+
+    # Optional contact for billing/communication
+    contact_email = models.EmailField(null=True, blank=True)
+
+    # Standard credit terms
+    payment_terms_days = models.IntegerField(default=30)
+    """ Example: If terms = 30 → invoice due 30 days after issue. """
+
+    # FK to the Accounts Receivable account in Chart of Accounts
+    """ If set: when creating an invoice for this customer, 
+        the system automatically books AR lines to that account. 
+    """
+    default_ar_account = models.ForeignKey(
+                            Account, 
+                            null=True, blank=True, 
+
+                            # If AR account is deleted/disabled, customer record isn’t broken, it just loses its default AR link.
+                            on_delete=models.SET_NULL,
+
+                            # Make reverse lookups possible
+                            related_name="customers_default_ar"
+                            """ (i.e., which customers use this AR account as default). """
+                        )
+
+    class Meta:
+        # Enforce uniqueness per tenant
+        unique_together = ("company", "name") 
+        """ Acme Ltd can have a customer named "ABC Trading", and 
+            Beta Inc can also have a customer with the same name. """
+
+    # Display customer name in admin/UI
+    def __str__(self):
+        return self.name
+
+
+class Vendor(models.Model):  # Mirrors Customer but for Accounts Payable (AP)
+    
+    company = models.ForeignKey(Company, on_delete=models.CASCADE) # Multi-tenant
+
+    # Same fields as Customer, but now for suppliers/vendors
+    name = models.CharField(max_length=200)
+    contact_email = models.EmailField(null=True, blank=True)
+    payment_terms_days = models.IntegerField(default=30)
+
+    # FK to the Accounts Payable account in Chart of Accounts
+    """ If set: when creating a Bill for this vendor, 
+        the system books AP lines to this account. """
+    default_ap_account = models.ForeignKey(
+                                Account, 
+                                null=True, blank=True, 
+                                on_delete=models.SET_NULL,
+                                related_name="vendors_default_ap" # Lets you see which vendors use a given AP account
+                            )
+
+    class Meta:
+        # Vendor names must be unique per company
+        unique_together = ("company", "name")
+
+    def __str__(self):
+        return self.name
