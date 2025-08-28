@@ -41,3 +41,34 @@ PAYMENT_METHODS = [
     ("other", "Other"),
 ]
 
+# ---------- Tenant / Company ----------
+class Company(models.Model):
+    """Tenant / Organization""" 
+
+    name = models.CharField(max_length=200) # Store company’s full display name
+
+    slug = models.SlugField( # A URL-friendly identifier
+                            max_length=80, 
+                            unique=True  # no two companies can have the same slug
+                            ) 
+    
+    owner = models.ForeignKey(  # Links to a user account (creator or admin of company)
+                    settings.AUTH_USER_MODEL,  # use user model project is configured with
+                    null=True, blank=True,     # optional field
+                    on_delete=models.SET_NULL  # if user is deleted, company record stays, but owner is set to NULL.
+                )
+    
+    # Store default currency
+    """ Important since all journal entries and invoices need to know which currency they belong to """
+    currency_code = models.CharField(max_length=10, default="USD") 
+
+    # Store timestamp when the record is first created
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Meta options
+    class Meta:
+        verbose_name_plural = "companies"
+
+    # String Representation
+    def __str__(self):
+        return self.name
