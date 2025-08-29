@@ -492,3 +492,66 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
         # Automatically calculate line_total before saving
         self.line_total = (self.quantity or 0) * (self.unit_price or 0)
         super().save(*args, **kwargs)
+
+
+# ---------- Bills / BillLines ----------
+
+class Bill(models.Model): # Header represents vendor bill (Accounts Payable document)
+
+    # Bill belongs to a company (multi-tenant)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    
+    # Linked to a Vendor
+    vendor = models.ForeignKey(
+                                Vendor, null=True, blank=True, 
+                                # If vendor is deleted, the bill keeps its record but vendor goes NULL
+                                on_delete=models.SET_NULL
+                            )
+    # Vendor’s bill/invoice number (e.g. "INV-4567")
+    bill_number = models.CharField(max_length=64, null=True, blank=True)
+    date = models.DateField()                          # bill date
+    due_date = models.DateField(null=True, blank=True) # when payment is expected
+    
+    # Track workflow
+    status = models.CharField(max_length=20, default="draft")  # draft, open, paid, void
+    
+    # Sum of all bill lines
+    total = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+    
+    # How much is still unpaid
+    outstanding_amount = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+
+    class Meta:
+        # Optimize queries for “lookup by bill number” or “all bills for this vendor.”
+        indexes = [models.Index(fields=["company", "bill_number"]), 
+                   models.Index(fields=["company", "vendor"])]
+
+class BillLine(models.Model): # Detail line represents individual items/services on the bill
+   
+   # Belongs to both a company and its parent bill
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    bill = models.ForeignKey(Bill, on_delete=models.CASCADE)
+    
+    # Describes purchased item/service
+    description = models.TextField(null=True, blank=True)
+    
+    # Pricing fields: quantity × unit_price = line_total
+    quantity = models.DecimalField(max_digits=14, decimal_places=4, default=Decimal("1"))
+    unit_price = models.DecimalField(max_digits=18, decimal_places=4, default=Decimal("0.00"))
+    line_total = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+    
+    # Posts to the correct expense (or inventory/asset) account in the GL
+    account = models.ForeignKey(
+                                Account, null=True, blank=True, 
+                                on_delete=models.PROTECT,
+                                help_text="Expense/purchase account for this line"
+                            )
+
+    class Meta:
+        # For fast lookups of all lines on a given bill
+        indexes = [models.Index(fields=["company", "bill"])]
+
+    def save(self, *args, **kwargs):
+        # Automatically calculate line_total on save
+        self.line_total = (self.quantity or 0) * (self.unit_price or 0)
+        super().save(*args, **kwargs)
