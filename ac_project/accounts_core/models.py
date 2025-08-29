@@ -692,3 +692,27 @@ class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot us
         unique_together = ("company", "account", "snapshot_date")
         # Optimize queries like: “Get all account balances for Company A on 2025-08-31.”
         indexes = [models.Index(fields=["company", "snapshot_date"])]
+
+
+# ---------- Audit / Event log ----------
+class AuditLog(models.Model): # Gives accountability and traceability across whole system
+    # Associate log entry with a tenant (multi-company setup)
+    company = models.ForeignKey(
+                                Company, 
+                                # Nullable because some actions might not belong to a specific company (e.g., system-wide events).
+                                null=True, blank=True, 
+                                on_delete=models.SET_NULL
+                            )
+    # Which user performed the action 
+    # (Nullable in case the action was automated (e.g., background job, import script))
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    # Type of event being logged
+    action = models.CharField(max_length=50) # Common choices: create, update, delete, post
+    # What kind of object was affected 
+    object_type = models.CharField(max_length=100) # (e.g., "Invoice", "JournalEntry", "Customer")
+    # The primary key (or identifier) of the object
+    object_id = models.CharField(max_length=100)
+    # Store actual before/after details of what changed, in JSON format
+    changes = models.JSONField(null=True, blank=True)
+    # Timestamp when the event was logged
+    created_at = models.DateTimeField(auto_now_add=True) 
