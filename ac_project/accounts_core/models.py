@@ -555,3 +555,80 @@ class BillLine(models.Model): # Detail line represents individual items/services
         # Automatically calculate line_total on save
         self.line_total = (self.quantity or 0) * (self.unit_price or 0)
         super().save(*args, **kwargs)
+
+# ---------- Banking ----------
+
+class BankAccount(models.Model): # Represents bank account company maintains
+    # Belongs to a Company (multi-tenant)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    name = models.CharField(max_length=200) # e.g. "Checking Account", "Savings Account"
+    # Partial account number for display/security
+    account_number_masked = models.CharField(max_length=50, null=True, blank=True)
+    currency_code = models.CharField(max_length=10, default="USD")
+    last_reconciled_at = models.DateField(null=True, blank=True) # For reconciliation workflows
+
+    class Meta:
+        # A company cannot have two accounts with the same name
+        unique_together = ("company", "name")
+        # Indexed for fast lookup
+        indexes = [models.Index(fields=["company", "name"])]
+
+
+class BankTransaction(models.Model): # Represents single inflow/outflow in a bank account
+    # Belongs to both a Company and a specific BankAccount
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    bank_account = models.ForeignKey(BankAccount, on_delete=models.CASCADE)
+    payment_date = models.DateField() # when it cleared
+    # amount: positive = inflow (deposit), negative = outflow (payment)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    currency_code = models.CharField(max_length=10, default="USD")
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default="bank_transfer")
+    reference = models.CharField(max_length=200, null=True, blank=True)
+    
+
+    class Meta:
+        # Optimizes queries for reconciliation 
+        # (find all txns for a bank account or for a date)
+        indexes = [
+                    models.Index(fields=["company", "bank_account"]), 
+                    models.Index(fields=["company", "payment_date"])
+                ]
+
+
+class BankTransactionInvoice(models.Model): # Bridge table for applying bank transactions to invoices (AR settlements)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    # Many-to-many relationship between BankTransaction & Invoice
+    bank_transaction = models.ForeignKey(BankTransaction, on_delete=models.CASCADE)
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE)
+    # Allow partial application (e.g. $100 payment applied to a $250 invoice)
+    applied_amount = models.DecimalField(max_digits=18, decimal_places=2)
+
+    class Meta:
+        indexes = [models.Index(fields=["company", "bank_transaction"]), 
+                   models.Index(fields=["company", "invoice"])]
+        
+        # Each bank transaction can be linked to the same invoice only once
+        constraints = [
+            models.UniqueConstraint(
+                                    fields=["bank_transaction", "invoice"], 
+                                    name="unique_bank_tx_invoice"
+                                )
+        ]
+
+ 
+class BankTransactionBill(models.Model): # Bridge table for applying bank transactions to bills (AP settlements)
+    # Same idea as invoices, but for vendor payments
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    bank_transaction = models.ForeignKey(BankTransaction, on_delete=models.CASCADE)
+    bill = models.ForeignKey(Bill, on_delete=models.CASCADE)
+    # Supports partial payments
+    applied_amount = models.DecimalField(max_digits=18, decimal_places=2)
+
+    class Meta:
+        # Prevent duplicate application of the same bank transaction to the same bill
+        constraints = [
+            models.UniqueConstraint(
+                fields=["bank_transaction", "bill"], 
+                name="unique_bank_tx_bill"
+                )
+        ]
