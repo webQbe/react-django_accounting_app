@@ -632,3 +632,40 @@ class BankTransactionBill(models.Model): # Bridge table for applying bank transa
                 name="unique_bank_tx_bill"
                 )
         ]
+
+
+# ---------- Fixed Assets ----------
+class FixedAsset(models.Model): # tracks long-term assets and handle depreciation over time
+    # Each fixed asset belongs to a company (multi-tenant)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    # An optional identifier for the asset
+    asset_code = models.CharField(max_length=80, null=True, blank=True)
+    # Human-readable name/description
+    description = models.CharField(max_length=400) 
+    # Date the asset was bought
+    purchase_date = models.DateField(null=True, blank=True) 
+    # Acquisition cost - stored as Decimal for precision in accounting
+    purchase_cost = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+   
+    # Estimated lifespan in years (for depreciation)
+    useful_life_years = models.IntegerField(null=True, blank=True) 
+    depreciation_method = models.CharField(
+                            max_length=30, 
+                            default="straight_line"
+                                """ How depreciation is calculated:
+                                    "straight_line" = equal expense every year.
+                                    Other methods could include "declining_balance", "units_of_production". """
+                            )
+    
+    # Track how much depreciation has already been recorded
+    accumulated_depreciation = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+    """ Example: if a $12,000 asset is depreciated $4,000 per year, after 2 years this field = $8,000. """
+    
+    class Meta:
+        # Index makes lookup faster by (company, asset_code) 
+        # (since assets are often tracked by code)
+        indexes = [models.Index(fields=["company", "asset_code"])]
+
+    def __str__(self):
+        # Return description when you print an asset in Django shell/admin
+        return self.description
