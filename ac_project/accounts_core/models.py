@@ -669,3 +669,26 @@ class FixedAsset(models.Model): # tracks long-term assets and handle depreciatio
     def __str__(self):
         # Return description when you print an asset in Django shell/admin
         return self.description
+
+# ---------- Account Balance Snapshot (optional materialized) ----------
+class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot used for reporting performance
+   
+    # Tied to a specific tenant (multi-company setup)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    # Snapshot is for a specific GL account (like Cash, Accounts Payable, Sales)
+    account = models.ForeignKey(Account, on_delete=models.CASCADE)
+    # The date snapshot is taken (daily, monthly, or at reporting cutoffs (e.g., end of period))
+    snapshot_date = models.DateField()
+
+    # Hold account balance split into debit/credit buckets
+    debit_balance = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+    credit_balance = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+    """ Example:
+            Cash account might show Debit = 10,000; Credit = 0.
+            Accounts Payable might show Debit = 0; Credit = 5,000. """
+    
+    class Meta:
+        # Ensure you don’t store duplicate snapshots for the same account/date
+        unique_together = ("company", "account", "snapshot_date")
+        # Optimize queries like: “Get all account balances for Company A on 2025-08-31.”
+        indexes = [models.Index(fields=["company", "snapshot_date"])]
