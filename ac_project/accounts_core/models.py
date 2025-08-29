@@ -294,3 +294,127 @@ class Item(models.Model): # Represents something a company sells & purchases
 
     def __str__(self):
         return self.name
+
+
+# ---------- Journal (Header) & JournalLine ----------
+class JournalEntry(models.Model): # Represents one accounting transaction 
+    # Header-level info
+    # Multi-tenant: every entry belongs to a company
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    # Optional link to an accounting period (for reporting, closing)
+    period = models.ForeignKey(Period, null=True, blank=True, on_delete=models.SET_NULL)
+    # Business metadata
+    date = models.DateField()
+    reference = models.CharField(max_length=200, null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
+    status = models.CharField(
+                        max_length=10, 
+                        choices=JOURNAL_STATUS, 
+                        default="draft" # Workflow control: "draft" until validated, then "posted".
+                        """ Once posted, becomes immutable. """
+                        )
+    posted_at = models.DateTimeField(null=True, blank=True)
+    # Track user who created it
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    # optional polymorphic source info (invoice, bill, bank txn, fixed asset actions)
+    source_type = models.CharField(max_length=50, null=True, blank=True) # Helps trace back where the JE originated
+    source_id = models.BigIntegerField(null=True, blank=True)
+
+    class Meta:
+        # Speed up listing & filtering (e.g. show all posted entries this month)
+        indexes = [models.Index(fields=["company", "date"]), models.Index(fields=["company", "status"])]
+
+    def __str__(self):
+        return f"JE {self.pk} {self.date} [{self.status}]"
+
+    # Aggregate all debit and credit amounts across entry’s lines
+    def compute_totals(self):
+        """Return (debits, credits) sums for lines"""
+        aggs = self.journalline_set.aggregate(
+            total_debit=models.Sum("debit_amount"),
+            total_credit=models.Sum("credit_amount"),
+        )
+        return (aggs["total_debit"] or Decimal("0.0"), aggs["total_credit"] or Decimal("0.0"))
+
+    # True if double-entry rule holds: total debits = total credits
+    def is_balanced(self):
+        debit, credit = self.compute_totals()
+        return (debit == credit)
+
+    # Post the entry safely inside a database transaction
+    def post(self, user=None):
+        """Post the journal entry: check balance, mark posted, make lines immutable.
+        Must run inside a transaction in views or service layer.
+        """
+        with transaction.atomic():
+            # reload to lock
+            # Lock the row to avoid race conditions
+            je = JournalEntry.objects.select_for_update().get(pk=self.pk)
+            if je.status == "posted":
+                raise ValidationError("Already posted")
+            d, c = je.compute_totals()
+            # Enforce balance before marking posted
+            if d != c:
+                raise ValidationError("Journal entry not balanced: debit != credit")
+            je.status = "posted" # Once posted → lines become immutable
+            je.posted_at = timezone.now()
+            if user:
+                je.created_by = user
+            je.save()
+            # optionally: record ledgers / run balance snapshots etc.
+
+
+class JournalLine(models.Model): # Stores Lines ( credits / debits )
+    """
+    Each line belongs to a journal entry and to a GL account.
+    Optional foreign keys to invoice/bill/banktransaction/fixedasset for traceability.
+    """
+    # Belongs to company & a journal entry
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    journal = models.ForeignKey(JournalEntry, on_delete=models.CASCADE)
+
+    # Must point to one Account (can’t delete account if lines exist → PROTECT)
+    account = models.ForeignKey(Account, on_delete=models.PROTECT)
+
+    # Description and the debit/credit split
+    description = models.CharField(max_length=400, null=True, blank=True)
+    debit_amount = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+    credit_amount = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+    
+    # Link each posting line back to the business object that caused it
+    invoice = models.ForeignKey("Invoice", null=True, blank=True, on_delete=models.SET_NULL)
+    bill = models.ForeignKey("Bill", null=True, blank=True, on_delete=models.SET_NULL)
+    bank_transaction = models.ForeignKey("BankTransaction", null=True, blank=True, on_delete=models.SET_NULL)
+    fixed_asset = models.ForeignKey("FixedAsset", null=True, blank=True, on_delete=models.SET_NULL)
+
+    # audit / immutability marker (populated when journal posted)
+    is_posted = models.BooleanField(default=False) # prevents edits later
+
+    class Meta:
+        # For fast queries like “all lines for this account” / “all lines in this JE.”
+        indexes = [
+            models.Index(fields=["company", "account"]),
+            models.Index(fields=["company", "journal"]),
+        ]
+
+        # Enforce debits and credits must be non-negative
+        """ You can (optionally) add a CHECK constraint in Postgres to 
+            prevent both debit & credit > 0 and at least one of them non-zero. 
+            Django 3.2+ supports CheckConstraint. """
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(debit_amount__gte=0) & models.Q(credit_amount__gte=0)
+                ),
+                name="non_negative_amounts"
+            ),
+        ]
+
+    # Business logic validation: 
+    # each line must be either debit or credit, not both, not zero.
+    def clean(self):
+        # ensure debit xor credit or both allowed? Usually one is zero.
+        if (self.debit_amount > 0) and (self.credit_amount > 0):
+            raise ValidationError("JournalLine should not have both debit and credit > 0")
+        if (self.debit_amount == 0) and (self.credit_amount == 0):
+            raise ValidationError("JournalLine requires a non-zero amount on either debit or credit")
