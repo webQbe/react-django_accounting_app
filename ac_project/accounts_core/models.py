@@ -418,3 +418,77 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
             raise ValidationError("JournalLine should not have both debit and credit > 0")
         if (self.debit_amount == 0) and (self.credit_amount == 0):
             raise ValidationError("JournalLine requires a non-zero amount on either debit or credit")
+        
+
+# ---------- Invoices / InvoiceLines ----------
+class Invoice(models.Model): # Represents a customer invoice
+    
+    # Invoice belongs to one company (multi-tenant)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    
+    # Optionally linked to a Customer 
+    # (if deleted, invoice keeps record but customer becomes NULL)
+    customer = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.SET_NULL)
+   
+    # Identifiers and key dates
+    # human-readable (e.g. "INV-2025-001")
+    invoice_number = models.CharField(max_length=64, null=True, blank=True) 
+    date = models.DateField() # issue date
+    due_date = models.DateField(null=True, blank=True) # payment deadline (can be auto-calculated from customer’s payment terms)
+   
+    status = models.CharField(max_length=20, default="draft")  # draft, open, paid, void
+    """ Workflow:
+        draft = not yet finalized.
+        open = issued but not paid.
+        paid = fully settled.
+        void = canceled. """
+    
+    # Supports multiple currencies
+    currency_code = models.CharField(max_length=10, default="USD")
+    # Sum of all line totals
+    total = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+    # Unpaid amount after payments are applied
+    outstanding_amount = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+
+    class Meta:
+        # Optimize for fast lookups by invoice number or customer
+        indexes = [ models.Index(fields=["company", "invoice_number"]), 
+                    models.Index(fields=["company", "customer"])]
+
+    def __str__(self):
+        # If no invoice number, fall back to database ID
+        return f"Inv {self.invoice_number or self.pk}"
+
+
+class InvoiceLine(models.Model): # Each line describes a product/service sold on the invoice
+    
+    # Line belongs to both company and parent invoice
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE)
+
+    # Optionally linked to a predefined Item
+    # Or just free-text description if it’s a custom line
+    item = models.ForeignKey(Item, null=True, blank=True, on_delete=models.SET_NULL)
+    description = models.TextField(null=True, blank=True)
+
+    # Core pricing logic: quantity × unit_price = line_total
+    quantity = models.DecimalField(max_digits=14, decimal_places=4, default=Decimal("1"))
+    unit_price = models.DecimalField(max_digits=18, decimal_places=4, default=Decimal("0.00"))
+    line_total = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+    
+    # Post to the correct revenue GL account
+    account = models.ForeignKey(
+                                    Account, null=True, blank=True, 
+                                    # You can’t delete an account if lines still point to it
+                                    on_delete=models.PROTECT,
+                                    help_text="Sales / revenue account for this line"
+                                )
+
+    class Meta:
+        # Speed up queries like “all lines for this invoice.”
+        indexes = [models.Index(fields=["company", "invoice"])]
+
+    def save(self, *args, **kwargs):
+        # Automatically calculate line_total before saving
+        self.line_total = (self.quantity or 0) * (self.unit_price or 0)
+        super().save(*args, **kwargs)
