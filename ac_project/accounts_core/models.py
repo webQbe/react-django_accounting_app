@@ -481,7 +481,11 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
 
     # Optionally linked to a predefined Item
     # Or just free-text description if it’s a custom line
-    item = models.ForeignKey(Item, null=True, blank=True, on_delete=models.SET_NULL)
+    item = models.ForeignKey(
+                                Item, null=True, blank=True, 
+                                # Prevent deleting item which has been invoiced
+                                on_delete=models.PROTECT
+                            )
     description = models.TextField(null=True, blank=True)
 
     # Core pricing logic: quantity × unit_price = line_total
