@@ -343,25 +343,23 @@ class JournalEntry(models.Model): # Represents one accounting transaction
 
     # Post the entry safely inside a database transaction
     def post(self, user=None):
-        """Post the journal entry: check balance, mark posted, make lines immutable.
-        Must run inside a transaction in views or service layer.
         """
-        with transaction.atomic():
-            # reload to lock
-            # Lock the row to avoid race conditions
-            je = JournalEntry.objects.select_for_update().get(pk=self.pk)
-            if je.status == "posted":
+            Model keeps pure business logic (totals, balance checks, state transition)
+            - Ensure balanced debits/credits
+            - Mark as posted
+            Transaction management + orchestration moved to services.py
+        """
+        # Check for status
+        if self.status == "posted":
                 raise ValidationError("Already posted")
-            d, c = je.compute_totals()
-            # Enforce balance before marking posted
-            if d != c:
+        # Enforce balance before marking posted
+        if not self.is_balanced():
                 raise ValidationError("Journal entry not balanced: debit != credit")
-            je.status = "posted" # Once posted → lines become immutable
-            je.posted_at = timezone.now()
-            if user:
-                je.created_by = user
-            je.save()
-            # optionally: record ledgers / run balance snapshots etc.
+        self.status = "posted" # Once posted → lines become immutable
+        self.posted_at = timezone.now()
+        if user:
+                self.created_by = user
+        self.save()
 
 
 class JournalLine(models.Model): # Stores Lines ( credits / debits )
@@ -716,3 +714,5 @@ class AuditLog(models.Model): # Gives accountability and traceability across who
     changes = models.JSONField(null=True, blank=True)
     # Timestamp when the event was logged
     created_at = models.DateTimeField(auto_now_add=True) 
+
+
