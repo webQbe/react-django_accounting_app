@@ -385,7 +385,11 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
     # Link each posting line back to the business object that caused it
     invoice = models.ForeignKey("Invoice", null=True, blank=True, on_delete=models.SET_NULL)
     bill = models.ForeignKey("Bill", null=True, blank=True, on_delete=models.SET_NULL)
-    bank_transaction = models.ForeignKey("BankTransaction", null=True, blank=True, on_delete=models.SET_NULL)
+    bank_transaction = models.ForeignKey(  "BankTransaction", 
+                                            null=True, blank=True, 
+                                            # on deleting a bank transaction
+                                            on_delete=models.PROTECT # prevent breaking audit trails
+                                         )
     fixed_asset = models.ForeignKey("FixedAsset", null=True, blank=True, on_delete=models.SET_NULL)
 
     # audit / immutability marker (populated when journal posted)
