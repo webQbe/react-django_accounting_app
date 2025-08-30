@@ -390,7 +390,11 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
                                             # on deleting a bank transaction
                                             on_delete=models.PROTECT # prevent breaking audit trails
                                          )
-    fixed_asset = models.ForeignKey("FixedAsset", null=True, blank=True, on_delete=models.SET_NULL)
+    fixed_asset = models.ForeignKey(
+                                    "FixedAsset", null=True, blank=True,
+                                    # on deleting a fixed_asset 
+                                    on_delete=models.PROTECT # do not remove posted journal entries
+                                 )
 
     # audit / immutability marker (populated when journal posted)
     is_posted = models.BooleanField(default=False) # prevents edits later
