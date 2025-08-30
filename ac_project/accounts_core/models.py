@@ -302,7 +302,10 @@ class JournalEntry(models.Model): # Represents one accounting transaction
     # Multi-tenant: every entry belongs to a company
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     # Optional link to an accounting period (for reporting, closing)
-    period = models.ForeignKey(Period, null=True, blank=True, on_delete=models.SET_NULL)
+    period = models.ForeignKey(
+                                Period, null=True, blank=True, 
+                                on_delete=models.PROTECT # Prevent breaking historical ledger
+                            )
     # Business metadata
     date = models.DateField()
     reference = models.CharField(max_length=200, null=True, blank=True)
