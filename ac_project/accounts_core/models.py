@@ -437,7 +437,11 @@ class Invoice(models.Model): # Represents a customer invoice
     
     # Optionally linked to a Customer 
     # (if deleted, invoice keeps record but customer becomes NULL)
-    customer = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.SET_NULL)
+    customer = models.ForeignKey(
+                                Customer, null=True, blank=True, 
+                                # prevent deleting customer who has invoices
+                                on_delete=models.PROTECT
+                        )
    
     # Identifiers and key dates
     # human-readable (e.g. "INV-2025-001")
