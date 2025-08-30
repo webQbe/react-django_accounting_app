@@ -548,6 +548,13 @@ class BillLine(models.Model): # Detail line represents individual items/services
    # Belongs to both a company and its parent bill
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     bill = models.ForeignKey(Bill, on_delete=models.CASCADE)
+
+    # Optionally linked to a predefined Item
+    item = models.ForeignKey(
+                                Item, null=True, blank=True, 
+                                # Prevent deleting item which has been billed
+                                on_delete=models.PROTECT
+                            )
     
     # Describes purchased item/service
     description = models.TextField(null=True, blank=True)
