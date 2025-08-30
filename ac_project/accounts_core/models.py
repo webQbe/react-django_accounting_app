@@ -439,7 +439,7 @@ class Invoice(models.Model): # Represents a customer invoice
     # (if deleted, invoice keeps record but customer becomes NULL)
     customer = models.ForeignKey(
                                 Customer, null=True, blank=True, 
-                                # prevent deleting customer who has invoices
+                                # prevent deleting customer who has an invoice
                                 on_delete=models.PROTECT
                         )
    
@@ -517,8 +517,8 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
     # Linked to a Vendor
     vendor = models.ForeignKey(
                                 Vendor, null=True, blank=True, 
-                                # If vendor is deleted, the bill keeps its record but vendor goes NULL
-                                on_delete=models.SET_NULL
+                                # prevent deleting customer who has a bill
+                                on_delete=models.PROTECT
                             )
     # Vendor’s bill/invoice number (e.g. "INV-4567")
     bill_number = models.CharField(max_length=64, null=True, blank=True)
