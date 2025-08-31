@@ -790,3 +790,56 @@ class User(AbstractUser): # Replace built-in user with custom user to add add ex
         # Try to return full name
         return self.get_full_name() or self.username # Fall back to username if no name is set
 
+
+# ---------- EntityMembership ----------
+class EntityMembership(models.Model): # Bridge table (or a "join model") between User and Company
+   
+    # Limit roles to predefined values
+    ROLE_CHOICES = [
+        # Django admin / forms will show a dropdown with these choices
+        ("owner", "Owner"),           # full control (e.g., the person who created the company)
+        ("admin", "Admin"),           # can manage settings & users
+        ("accountant", "Accountant"), # can post journals, invoices, but maybe not delete companies
+        ("viewer", "Viewer"),         # read-only access
+    ]
+
+    # Link to custom User
+    user = models.ForeignKey(  
+                                settings.AUTH_USER_MODEL, 
+                                on_delete=models.CASCADE,  # If user is deleted, their memberships go too
+                                related_name="memberships" # See all companies users belong to
+                            )
+    
+    # Links to a Company record
+    company = models.ForeignKey("Company", on_delete=models.CASCADE, related_name="memberships")
+    
+    # Store user’s role in the company
+    role = models.CharField(
+                            max_length=20, choices=ROLE_CHOICES, 
+                            default="viewer" # Defaults to "viewer" (safe, read-only)
+                            )
+    
+    # Suspend someone’s access without deleting the record
+    is_active = models.BooleanField(default=True)
+    """ 
+        Think of it like a switch that controls whether a membership is “turned on” without throwing it away.
+            If is_active=True → the membership is valid. 
+                The user has access to that company with their role.
+            If is_active=False → the membership still exists in the database, 
+                but you can treat it as “suspended” or “revoked.” 
+    """
+
+    # Automatically record when membership was created
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # one user can only have one membership per company (prevents duplicates)
+        unique_together = ("user", "company")
+        # make lookups fast (important since almost every query will filter by company)
+        indexes = [
+            models.Index(fields=["company", "user"]),
+        ]
+
+    def __str__(self):
+        # Make debugging/admin easier
+        return f"{self.user} @ {self.company} ({self.role})"
