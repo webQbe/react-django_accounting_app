@@ -770,7 +770,7 @@ class User(AbstractUser): # Replace built-in user with custom user to add add ex
     # Inherits from Django’s AbstractUser, so it keeps all the usual fields
     """ 
     Before you run your very first migrate,  
-    add: 'AUTH_USER_MODEL = "ledger.User"' to settings.py
+    add: 'AUTH_USER_MODEL = "accounts_core.User"' to settings.py
     to avoid migration conflicts
     """
     # A link to a Company (your tenant)
