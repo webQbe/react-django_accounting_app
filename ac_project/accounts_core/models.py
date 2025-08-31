@@ -51,6 +51,14 @@ class Company(models.Model):
                             max_length=80, 
                             unique=True  # no two companies can have the same slug
                             ) 
+
+    # Reference Currency model with ForeignKey
+    default_currency = models.ForeignKey(
+        "Currency",
+        # don’t allow deleting a currency that a company depends on
+        on_delete=models.PROTECT,   
+        related_name="companies"
+    )
     
     owner = models.ForeignKey(  # Links to a user account (creator or admin of company)
                     settings.AUTH_USER_MODEL,  # use user model project is configured with
