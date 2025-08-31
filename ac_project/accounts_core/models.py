@@ -765,3 +765,28 @@ class Currency(models.Model): # Store a list of valid currencies
         verbose_name_plural = "currencies"
 
 
+# ---------- Custom User (optional) ---------- 
+class User(AbstractUser): # Replace built-in user with custom user to add add extra fields
+    # Inherits from Django’s AbstractUser, so it keeps all the usual fields
+    """ 
+    Before you run your very first migrate,  
+    add: 'AUTH_USER_MODEL = "ledger.User"' to settings.py
+    to avoid migration conflicts
+    """
+    # A link to a Company (your tenant)
+    default_company = models.ForeignKey("Company", 
+                                        # Nullable, user might exist before being assigned company
+                                        null=True, blank=True,
+                                        # If the company is deleted, don’t delete the user, just clear their default company
+                                        on_delete=models.SET_NULL,
+                                        # From Company side, see which users have the company as default
+                                        related_name="default_users")
+    
+    # Optional contact number field, can be left empty in forms
+    phone = models.CharField(max_length=32, blank=True)
+
+    # Controls how user is displayed
+    def __str__(self):
+        # Try to return full name
+        return self.get_full_name() or self.username # Fall back to username if no name is set
+
