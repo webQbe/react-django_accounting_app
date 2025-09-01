@@ -152,7 +152,10 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
 class Period(models.Model): # Each Period represents a time bucket during which financial transactions are grouped
    
     # Every company has its own independent calendar of periods
-    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    company = models.ForeignKey(Company, 
+                                # Prevent accidental deletion of periods tied to journal entries, invoices, or bills
+                                on_delete=models.PROTECT
+                                )
     """ 
         Tenant isolation: 
         "Company A" can close July while "Company B" is still open. 
