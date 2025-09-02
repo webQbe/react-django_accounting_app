@@ -425,7 +425,10 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
         constraints = [
             models.CheckConstraint(
                 check=(
-                    models.Q(debit_amount__gte=0) & models.Q(credit_amount__gte=0)
+                    # You can’t insert or update a row with a negative debit or credit
+                    models.Q(debit_amount__gte=0) & 
+                    models.Q(credit_amount__gte=0)
+                    # Django reuses Q objects to build SQL conditions for constraints
                 ),
                 name="non_negative_amounts"
             ),
