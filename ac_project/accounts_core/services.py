@@ -30,46 +30,54 @@ def post_journal_entry(journal_entry_id, user=None):
 # ----------------------------
 # Payment-related workflows
 # ----------------------------
-def apply_payment(bt_id, invoice_id, amount):
+def apply_payment(bt_id: int, invoice_id: int, amount: float):
     """
-    Apply a bank transaction to an invoice.
-    Ensures allocations never exceed the available transaction amount.
+    Apply part (or all) of a bank transaction to an invoice.
+    Locks both rows during the operation.
     """
     with transaction.atomic(): # Everything inside either succeeds as one unit or rolls back if something fails
 
-        # 1. Lock the bank transaction row until the transaction finishes
+        # Lock the bank transaction and invoice rows until the transaction finishes
         bt = BankTransaction.objects.select_for_update().get(pk=bt_id)
+        inv = Invoice.objects.select_for_update().get(pk=invoice_id)
 
-        # 2. Sum all amounts already applied from this bank transaction
+        # Validate invoice outstanding
+        if amount > inv.outstanding_amount:
+            raise ValidationError("Payment exceeds invoice outstanding amount")
+
+        # Validate bank transaction remaining capacity
         total_applied = (
-            BankTransactionInvoice.objects
-            .filter(bank_transaction=bt)
-            .aggregate(total=models.Sum("applied_amount"))
-            ["total"] or Decimal("0.00") # If none exist, defaults to 0.00
+            bt.banktransactioninvoice_set.aggregate(total=models.Sum("applied_amount"))["total"] or 0
         )
 
-        # 3. Validation: prevent over-allocation
+        # Validation: prevent over-allocation
         if total_applied + amount > bt.amount:
             raise ValidationError("Applied amounts exceed bank transaction amount")
 
-        # 4. Record the allocation (link BankTransaction → Invoice)
+        # Create join row
             """ This represents X amount of this bank transaction settles this invoice """
         BankTransactionInvoice.objects.create( # Creates join record in M2M table
-            company = bt.company,
-            bank_transaction = bt,
-            invoice_id = invoice_id,
-            applied_amount = amount
+            bank_transaction=bt,
+            invoice=inv,
+            applied_amount=amount,
+            company=bt.company,  # enforce tenancy
         )
 
-        # 5. Reduce the outstanding balance on the invoice
-        inv = Invoice.objects.get(pk=invoice_id)
-        inv.outstanding_amount = max( # Ensure it never goes negative
-                                        Decimal("0.00"),
-                                        inv.outstanding_amount - amount
-                                    )
-        inv.save()
+        # Update invoice outstanding
+        inv.outstanding_amount -= amount
+        if inv.outstanding_amount <= 0:
+            inv.status = "paid"
+        inv.save(update_fields=["outstanding_amount", "status"])
 
-    return True
+        # Update bank transaction status
+        total_applied += amount
+        if total_applied >= bt.amount:
+            bt.status = "fully_applied"
+        else:
+            bt.status = "partially_applied"
+        bt.save(update_fields=["status"])
+
+        return bt, inv
 
 
 # ----------------------------
