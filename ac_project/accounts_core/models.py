@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError  # Built-in way to raise vali
 from django.db import models, transaction           # To wrap operations in a DB transaction
 from django.utils import timezone                   # Timezone-aware datetime helper
 from django.contrib.auth.models import AbstractUser
+from managers import TenantManager  # To enforce tenant scoping   
 
 # Choice Lists
 AC_TYPES = [
@@ -83,6 +84,9 @@ class AccountCategory(models.Model): # For organizing accounts into categories
     company = models.ForeignKey(Company, on_delete=models.CASCADE) # each company has its own set of categories (multi-tenant safe)
     name = models.CharField(max_length=100) # category’s label (e.g. "Current Assets")
 
+    # Enforce tenant scoping
+    objects = TenantManager() 
+
     class Meta:
         unique_together = ("company", "name") # A company can’t have two categories with the same name
 
@@ -130,6 +134,9 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
     is_active = models.BooleanField(default=True) # “soft deactivate” accounts (hide in UI, stop new postings) without deleting history
     created_at = models.DateTimeField(auto_now_add=True) # Track when the account was created.
 
+    # Enforce tenant scoping
+    objects = TenantManager() 
+
     class Meta:
         unique_together = ("company", "code") # Enforce unique account codes per company
         """ Two companies can both have an account "1000 Cash", but the same company cannot. """
@@ -171,6 +178,9 @@ class Period(models.Model): # Each Period represents a time bucket during which 
             No new postings allowed.
             Prevents backdating transactions that could corrupt finalized reports.
     """
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
     class Meta:
         # Prevent duplicate period names inside the same company
@@ -218,6 +228,9 @@ class Customer(models.Model): # Represents client who receives invoices (AR side
                             """ i.e., which customers use this AR account as default. """
                         )
 
+    # Enforce tenant scoping
+    objects = TenantManager() 
+
     class Meta:
         # Enforce uniqueness per tenant
         unique_together = ("company", "name") 
@@ -247,6 +260,9 @@ class Vendor(models.Model):  # Mirrors Customer but for Accounts Payable (AP)
                                 on_delete=models.SET_NULL,
                                 related_name="vendors_default_ap" # Lets you see which vendors use a given AP account
                             )
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
     class Meta:
         # Vendor names must be unique per company
@@ -296,6 +312,9 @@ class Item(models.Model): # Represents something a company sells & purchases
                                         default=Decimal("0.0")           # Default = 0
                                     )
 
+    # Enforce tenant scoping
+    objects = TenantManager() 
+
     class Meta:
         unique_together = ("company", "sku") # Ensure each SKU is unique within a company
         indexes = [models.Index(fields=["company", "name"])] # for fast lookups - e.g. autocomplete when searching items
@@ -330,6 +349,9 @@ class JournalEntry(models.Model): # Represents one accounting transaction
     # optional polymorphic source info (invoice, bill, bank txn, fixed asset actions)
     source_type = models.CharField(max_length=50, null=True, blank=True) # Helps trace back where the JE originated
     source_id = models.BigIntegerField(null=True, blank=True)
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
     class Meta:
         # Speed up listing & filtering (e.g. show all posted entries this month)
@@ -411,6 +433,9 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
     # audit / immutability marker (populated when journal posted)
     is_posted = models.BooleanField(default=False) # prevents edits later
 
+    # Enforce tenant scoping
+    objects = TenantManager() 
+
     class Meta:
         # For fast queries like “all lines for this account” / “all lines in this JE.”
         indexes = [
@@ -477,6 +502,9 @@ class Invoice(models.Model): # Represents a customer invoice
     total = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
     # Unpaid amount after payments are applied
     outstanding_amount = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+    
+    # Enforce tenant scoping
+    objects = TenantManager()  
 
     class Meta:
         # Optimize for fast lookups by invoice number or customer
@@ -525,6 +553,9 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
                                     help_text="Sales / revenue account for this line"
                                 )
 
+    # Enforce tenant scoping
+    objects = TenantManager() 
+
     class Meta:
         # Speed up queries like “all lines for this invoice.”
         indexes = [models.Index(fields=["company", "invoice"])]
@@ -564,6 +595,9 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
     
     # How much is still unpaid
     outstanding_amount = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
     class Meta:
         # Optimize queries for “lookup by bill number” or “all bills for this vendor.”
@@ -606,6 +640,9 @@ class BillLine(models.Model): # Detail line represents individual items/services
                                 on_delete=models.PROTECT,
                                 help_text="Expense/purchase account for this line"
                             )
+    
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
     class Meta:
         # For fast lookups of all lines on a given bill
@@ -627,6 +664,9 @@ class BankAccount(models.Model): # Represents bank account company maintains
     currency_code = models.CharField(max_length=10, default="USD")
     last_reconciled_at = models.DateField(null=True, blank=True) # For reconciliation workflows
 
+    # Enforce tenant scoping
+    objects = TenantManager() 
+
     class Meta:
         # A company cannot have two accounts with the same name
         unique_together = ("company", "name")
@@ -645,6 +685,8 @@ class BankTransaction(models.Model): # Represents single inflow/outflow in a ban
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default="bank_transfer")
     reference = models.CharField(max_length=200, null=True, blank=True)
     
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
     class Meta:
         # Optimizes queries for reconciliation 
@@ -662,6 +704,9 @@ class BankTransactionInvoice(models.Model): # Bridge table for applying bank tra
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE)
     # Allow partial application (e.g. $100 payment applied to a $250 invoice)
     applied_amount = models.DecimalField(max_digits=18, decimal_places=2)
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
     class Meta:
         indexes = [models.Index(fields=["company", "bank_transaction"]), 
@@ -683,6 +728,9 @@ class BankTransactionBill(models.Model): # Bridge table for applying bank transa
     bill = models.ForeignKey(Bill, on_delete=models.CASCADE)
     # Supports partial payments
     applied_amount = models.DecimalField(max_digits=18, decimal_places=2)
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
     class Meta:
         # Prevent duplicate application of the same bank transaction to the same bill
@@ -721,6 +769,9 @@ class FixedAsset(models.Model): # tracks long-term assets and handle depreciatio
     accumulated_depreciation = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
     """ Example: if a $12,000 asset is depreciated $4,000 per year, after 2 years this field = $8,000. """
     
+    # Enforce tenant scoping
+    objects = TenantManager() 
+    
     class Meta:
         # Index makes lookup faster by company, asset_code
         # (since assets are often tracked by code)
@@ -746,6 +797,9 @@ class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot us
     """ Example:
             Cash account might show Debit = 10,000; Credit = 0.
             Accounts Payable might show Debit = 0; Credit = 5,000. """
+    
+    # Enforce tenant scoping
+    objects = TenantManager() 
     
     class Meta:
         # Ensure you don’t store duplicate snapshots for the same account/date
@@ -776,6 +830,9 @@ class AuditLog(models.Model): # Gives accountability and traceability across who
     changes = models.JSONField(null=True, blank=True)
     # Timestamp when the event was logged
     created_at = models.DateTimeField(auto_now_add=True) 
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
 # ---------- Currency ----------
 class Currency(models.Model): # Store a list of valid currencies
@@ -819,6 +876,9 @@ class User(AbstractUser): # Replace built-in user with custom user to add add ex
     
     # Optional contact number field, can be left empty in forms
     phone = models.CharField(max_length=32, blank=True)
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
     # Controls how user is displayed
     def __str__(self):
@@ -866,6 +926,9 @@ class EntityMembership(models.Model): # Bridge table (or a "join model") between
 
     # Automatically record when membership was created
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
 
     class Meta:
         # one user can only have one membership per company (prevents duplicates)
