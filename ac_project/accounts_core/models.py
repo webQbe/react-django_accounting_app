@@ -482,6 +482,15 @@ class Invoice(models.Model): # Represents a customer invoice
         # Optimize for fast lookups by invoice number or customer
         indexes = [ models.Index(fields=["company", "invoice_number"]), 
                     models.Index(fields=["company", "customer"])]
+        
+        constraints = [
+            # Within one company, each invoice number must be unique
+            # Across companies, duplicates are allowed
+            models.UniqueConstraint(
+                                    fields=["company", "invoice_number"], 
+                                    name="uq_invoice_company_number"
+                                )
+        ]     
 
     def __str__(self):
         # If no invoice number, fall back to database ID
@@ -546,6 +555,9 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
     
     # Track workflow
     status = models.CharField(max_length=20, default="draft")  # draft, open, paid, void
+
+    # Supports multiple currencies
+    currency_code = models.CharField(max_length=10, default="USD")
     
     # Sum of all bill lines
     total = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
@@ -557,6 +569,15 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
         # Optimize queries for “lookup by bill number” or “all bills for this vendor.”
         indexes = [models.Index(fields=["company", "bill_number"]), 
                    models.Index(fields=["company", "vendor"])]
+        
+        constraints = [
+            # Within one company, each bill number must be unique
+            # Across companies, duplicates are allowed
+            models.UniqueConstraint(
+                                    fields=["company", "bill_number"], 
+                                    name="uq_bill_company_number"
+                                )
+        ]
 
 class BillLine(models.Model): # Detail line represents individual items/services on the bill
    
