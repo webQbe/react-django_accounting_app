@@ -81,3 +81,56 @@ python manage.py makemigrations
 python manage.py migrate
 ```
 
+### Run tasks automatically
+
+
+#### 1. Install Celery + Beat
+
+In your project’s virtualenv:
+
+```bash
+pip install celery[redis]
+```
+
+* `celery` = the task queue
+* `[redis]` = adds Redis transport support (most common broker/backend)
+
+You’ll also need a broker (Redis is simplest):
+
+```bash
+sudo apt install redis-server
+```
+
+Start Redis:
+
+```bash
+redis-server
+```
+
+---
+
+#### 2. Configure Celery
+
+- Update your `settings.py`
+- Update `__init__.py` of your project (next to `settings.py`)
+
+
+#### 3. Write your task
+
+In `ac_project/tasks.py`
+
+
+---
+
+#### 4. Run Celery workers + Beat
+
+You need **two processes** running, run both in one combined process:
+
+```bash
+celery -A ac_project worker -B -l info
+```
+
+
+✅ Now Celery Beat will fire your task, and the Celery worker will execute it.
+
+

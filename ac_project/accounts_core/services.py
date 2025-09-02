@@ -3,6 +3,8 @@ from django.utils import timezone
 from django.core.exceptions import ValidationError
 from decimal import Decimal
 from django.db import models
+from django.apps import apps
+from typing import Any
 
 # Import models
 from .models import (
@@ -137,3 +139,30 @@ def depreciate_asset(asset_id, period_id, user=None):
         je.post(user=user) 
 
     return je
+
+
+# ------------------------------------
+# Snapshot update workflows
+# ------------------------------------
+def update_snapshots_for_journal(journal: JournalEntry): 
+    """Recalculate balances for accounts touched by this journal."""
+    # Prevent circular import issue
+    # Fetch models dynamically from Django app registry
+    AccountBalanceSnapshot = apps.get_model("accounts_core", "AccountBalanceSnapshot")
+
+    # Loop over each child JournalLine to update snapshot of corresponding account
+    for line in journal.journalline_set.all(): 
+        # journal.journalline_set.all() works because Django automatically gives you 
+        # the reverse relation manager from (journal: JournalEntry) → JournalLine
+        snapshot, _ = AccountBalanceSnapshot.objects.get_or_create(
+            # Grab snapshot row for (company, account, date) or 
+            # create one if missing
+            company=journal.company,
+            account=line.account,
+            snapshot_date=journal.date,
+        )
+        # Update debit/credit aggregates
+        # Add this line’s debit/credit to running balance for that day
+        snapshot.debit_balance += line.debit_amount or 0 # don’t try to add None
+        snapshot.credit_balance += line.credit_amount or 0
+        snapshot.save() # Save updated snapshot

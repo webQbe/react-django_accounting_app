@@ -123,3 +123,22 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = "accounts_core.User"
+
+# Schedule background full recomputation with Celery beat
+
+from celery.schedules import crontab # import Celery’s cron-style scheduler helper
+
+""" Run accounts_core.tasks.recompute_all_snapshots function now. """
+CELERY_BEAT_SCHEDULE = { # tell Celery Beat what to run and when
+    "recompute-snapshots-nightly": {                           # label for your job
+        "task": "accounts_core.tasks.recompute_all_snapshots", # import path to task function
+        "schedule": crontab(hour=0, minute=0),                 # run once a day at midnight
+        "args": (1,),                           # pass arguments to the task (company_id=1)             
+    },
+}
+
+# Tell Celery where to send & receive jobs
+CELERY_BROKER_URL = "redis://localhost:6379/0" # Celery needs message broker (redis) to queue tasks
+""" Use Redis server running on localhost/same machine.
+Port 6379 is Redis default.
+Database 0 - Redis lets you have multiple logical DBs, numbered 0–15. """

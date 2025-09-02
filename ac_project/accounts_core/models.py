@@ -8,8 +8,7 @@ from django.contrib.auth.models import AbstractUser
 
 # Choice Lists
 AC_TYPES = [
-    """ Used in Account model to classify general ledger accounts 
-        First element = DB value (e.g., "asset"). Second element = human-readable label (e.g., "Asset")."""
+    # Used in Account model to classify general ledger accounts
     ("asset", "Asset"),
     ("liability", "Liability"),
     ("equity", "Equity"),
@@ -18,23 +17,20 @@ AC_TYPES = [
 ]
 
 NORMAL_BALANCE = [
-    """ Defines whether the account normally increases on the debit side (Assets, Expenses) or 
-        credit side (Liabilities, Equity, Income)."""
+    # Defines whether the account normally increases on the debit side  or credit side
     ("debit", "Debit"),
     ("credit", "Credit"),
 ]
 
 JOURNAL_STATUS = [
-    """ Used in JournalEntry.
-        "draft" = still editable, "posted" = finalized, locked, "reversed" = reversal entry applied."""
-    ("draft", "Draft"),
-    ("posted", "Posted"),
-    ("reversed", "Reversed"),
+    ("draft", "Draft"),       # still editable
+    ("posted", "Posted"),     # finalized
+    ("reversed", "Reversed"), # reversal entry applied
 ]
 
 PAYMENT_METHODS = [
-    """ Used in BankTransaction or Payment entities.
-        Keeps payment method standardized across records. """
+    # Used in BankTransaction or Payment entities
+    # Keeps payment method standardized across records
     ("cash", "Cash"),
     ("cheque", "Cheque"),
     ("bank_transfer", "Bank Transfer"),
@@ -97,7 +93,7 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
     """
     Chart of Accounts entry.
     - code should be unique per company
-    - ac_type: determines reporting (BS vs P&L)
+    - ac_type: determines reporting -BS vs P&L
     - normal_balance: used to interpret sign when building reports
     """
     company = models.ForeignKey( # Each account belongs to one company
@@ -193,7 +189,7 @@ class Customer(models.Model): # Represents client who receives invoices (AR side
     # Multi-tenant: every customer belongs to a single company.
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     """ Example: 
-        Acme Ltd (Company A) can have its own customers separate from Beta Inc (Company B). 
+        Company A can have its own customers separate from Company B. 
     """
 
     # The customer’s legal or trade name
@@ -219,7 +215,7 @@ class Customer(models.Model): # Represents client who receives invoices (AR side
 
                             # Make reverse lookups possible
                             related_name="customers_default_ar"
-                            """ (i.e., which customers use this AR account as default). """
+                            """ i.e., which customers use this AR account as default. """
                         )
 
     class Meta:
@@ -285,7 +281,7 @@ class Item(models.Model): # Represents something a company sells & purchases
                                         related_name="items_sales_account"
                                     )
     
-    # FK → Expense account (for purchases/bills)
+    # FK → Expense account for purchases/bills
     """ Example: "Printer Paper" → posts to "6000: Office Supplies Expense". """
     purchase_account = models.ForeignKey(  Account, 
                                             null=True, blank=True, 
@@ -296,13 +292,13 @@ class Item(models.Model): # Represents something a company sells & purchases
     
     # Current stock level of the item
     on_hand_qty = models.DecimalField(  
-                                        max_digits=14, decimal_places=4, # Allow precise tracking (supports large quantities with fractional amounts, e.g. liters).
+                                        max_digits=14, decimal_places=4, # Allow precise tracking - supports large quantities with fractional amounts, e.g. liters.
                                         default=Decimal("0.0")           # Default = 0
                                     )
 
     class Meta:
-        unique_together = ("company", "sku")                 # Ensure each SKU is unique within a company
-        indexes = [models.Index(fields=["company", "name"])] # for fast lookups (e.g. autocomplete when searching items)
+        unique_together = ("company", "sku") # Ensure each SKU is unique within a company
+        indexes = [models.Index(fields=["company", "name"])] # for fast lookups - e.g. autocomplete when searching items
 
     def __str__(self):
         return self.name
@@ -344,7 +340,7 @@ class JournalEntry(models.Model): # Represents one accounting transaction
 
     # Aggregate all debit and credit amounts across entry’s lines
     def compute_totals(self):
-        """Return (debits, credits) sums for lines"""
+        """Return debits, credits sums for lines"""
         aggs = self.journalline_set.aggregate(
             total_debit=models.Sum("debit_amount"),
             total_credit=models.Sum("credit_amount"),
@@ -359,11 +355,12 @@ class JournalEntry(models.Model): # Represents one accounting transaction
     # Post the entry safely inside a database transaction
     def post(self, user=None):
         """
-            Model keeps pure business logic (totals, balance checks, state transition)
+            Model keeps pure business logic
             - Ensure balanced debits/credits
             - Mark as posted
-            Transaction management + orchestration moved to services.py
         """
+        # lazy import to avoid circular import at module load time
+        from .services import update_snapshots_for_journal
         # Check for status
         if self.status == "posted":
                 raise ValidationError("Already posted")
@@ -375,6 +372,9 @@ class JournalEntry(models.Model): # Represents one accounting transaction
         if user:
                 self.created_by = user
         self.save()
+
+        # Update snapshots
+        update_snapshots_for_journal(self)
 
 
 class JournalLine(models.Model): # Stores Lines ( credits / debits )
@@ -419,7 +419,7 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
         ]
 
         # Enforce debits and credits must be non-negative
-        """ You can (optionally) add a CHECK constraint in Postgres to 
+        """ You can optionally add a CHECK constraint in Postgres to 
             prevent both debit & credit > 0 and at least one of them non-zero. 
             Django 3.2+ supports CheckConstraint. """
         constraints = [
@@ -698,7 +698,7 @@ class FixedAsset(models.Model): # tracks long-term assets and handle depreciatio
     """ Example: if a $12,000 asset is depreciated $4,000 per year, after 2 years this field = $8,000. """
     
     class Meta:
-        # Index makes lookup faster by (company, asset_code) 
+        # Index makes lookup faster by company, asset_code
         # (since assets are often tracked by code)
         indexes = [models.Index(fields=["company", "asset_code"])]
 
