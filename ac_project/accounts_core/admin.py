@@ -49,3 +49,31 @@ class BankTransactionInvoiceInline(admin.TabularInline):
     model = models.BankTransactionInvoice
     extra = 0
     fields = ("invoice", "applied_amount")
+
+
+# ---------- Admin actions ----------
+
+# Bulk-post multiple journal entries from Django admin list view
+def post_journal_entries(modeladmin, # `ModelAdmin` class for JournalEntry
+                         request,    #  HTTP request object
+                         queryset    #  record what admin selected from list view
+                        ): 
+    """Attempt to post selected draft journal entries."""
+    success = 0
+    for je in queryset: # Loop through all selected journal entries
+        # Track how many got successfully posted
+        try: 
+             # Wrap each posting in a DB transaction
+            with transaction.atomic():     # Ensure either all steps succeed or DB rolls back
+                # Call `post()` on `JournalEntry` model
+                je.post(user=request.user) # Pass `request.user`to record who posted it
+            success += 1                   # If no error → increment success counter
+        except Exception as exc:  # Catch exception: ValidationError, etc.
+            # Show error message in Django admin interface
+            modeladmin.message_user(request, f"Could not post JournalEntry {je.pk}: {exc}", level=messages.ERROR)
+    
+    # After the loop, give user success message for how many entries posted successfully
+    modeladmin.message_user(request, f"Posted {success} JournalEntry(s).", level=messages.SUCCESS)
+
+# Translatable text to show up in admin “Actions” dropdown
+post_journal_entries.short_description = _("Post selected journal entries (make immutable)") 
