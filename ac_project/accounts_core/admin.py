@@ -53,6 +53,13 @@ class BankTransactionInvoiceInline(admin.TabularInline):
     extra = 0
     fields = ("invoice", "applied_amount")
 
+class BankTransactionBillInline(admin.TabularInline):
+    """ Let staff apply a bank transaction against one or more bills. 
+        Each row says: “this much from this transaction applies to that bill.”"""
+    model = models.BankTransactionBill
+    extra = 0
+    fields = ("bill", "applied_amount")
+
 
 # ---------- Admin actions ----------
 
@@ -314,7 +321,7 @@ class BankAccountAdmin(admin.ModelAdmin):
 class BankTransactionAdmin(admin.ModelAdmin):
     list_display = ("id", "company", "bank_account", "payment_date", "amount", "payment_method", "reference")
     list_filter = ("company", "bank_account", "payment_method", "payment_date")
-    inlines = [BankTransactionInvoiceInline]
+    inlines = [BankTransactionInvoiceInline, BankTransactionBillInline]
 
     # Fetch everything in one SQL join
     def get_queryset(self, request):
