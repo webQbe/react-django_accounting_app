@@ -88,7 +88,11 @@ class AccountCategory(models.Model): # For organizing accounts into categories
     objects = TenantManager() 
 
     class Meta:
-        unique_together = ("company", "name") # A company can’t have two categories with the same name
+        # Account category names repeat across companies but must be unique within one
+        constraints = [
+          models.UniqueConstraint(fields=["company", "name"], 
+                                  name="uq_company_accountcategory_name"),
+      ]
 
     def __str__(self):
         return f"{self.company.slug} - {self.name}" # Example: "acme - Current Assets"
@@ -138,12 +142,18 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
     objects = TenantManager() 
 
     class Meta:
-        unique_together = ("company", "code") # Enforce unique account codes per company
-        """ Two companies can both have an account "1000 Cash", but the same company cannot. """
         indexes = [ # Optimize queries
             models.Index(fields=["company", "ac_type"]), # For reports grouped by ac_type (Trial Balance, P&L, Balance Sheet)
             models.Index(fields=["company", "code"]),    # For looking up accounts by code
         ]
+
+        """ Each company defines its own chart of accounts. 
+               Codes repeat across companies but must be unique within one. """
+        constraints = [
+            models.UniqueConstraint(
+                            fields=["company", "code"], 
+                            name="uq_company_account_code"
+                    )]
 
     def __str__(self): 
         # Make accounts readable in the Django admin and debugging
@@ -184,7 +194,10 @@ class Period(models.Model): # Each Period represents a time bucket during which 
 
     class Meta:
         # Prevent duplicate period names inside the same company
-        unique_together = ("company", "name") # E.g., "2025-07" can exist once per company
+        constraints = [
+          models.UniqueConstraint(fields=["company", "name"], 
+                                  name="uq_company_period_name"),
+      ]
         
         # Default query ordering: periods are returned sorted by company, then chronologically
         ordering = ("company", "start_date") # no need to sort manually
@@ -233,9 +246,10 @@ class Customer(models.Model): # Represents client who receives invoices (AR side
 
     class Meta:
         # Enforce uniqueness per tenant
-        unique_together = ("company", "name") 
-        """ Acme Ltd can have a customer named "ABC Trading", and 
-            Beta Inc can also have a customer with the same name. """
+        constraints = [
+          models.UniqueConstraint(fields=["company", "name"], 
+                                  name="uq_company_customer_name"),
+        ]
 
     # Display customer name in admin/UI
     def __str__(self):
@@ -266,7 +280,10 @@ class Vendor(models.Model):  # Mirrors Customer but for Accounts Payable (AP)
 
     class Meta:
         # Vendor names must be unique per company
-        unique_together = ("company", "name")
+        constraints = [
+          models.UniqueConstraint(fields=["company", "name"], 
+                                  name="uq_company_vendor_name"),
+        ]
 
     def __str__(self):
         return self.name
@@ -316,8 +333,16 @@ class Item(models.Model): # Represents something a company sells & purchases
     objects = TenantManager() 
 
     class Meta:
-        unique_together = ("company", "sku") # Ensure each SKU is unique within a company
-        indexes = [models.Index(fields=["company", "name"])] # for fast lookups - e.g. autocomplete when searching items
+        # for fast lookups
+        indexes = [models.Index(fields=["company", "name"])] 
+
+        # Ensure each SKU is unique within a company
+        constraints = [
+            models.UniqueConstraint(
+                                    fields=["company", "sku"], 
+                                    name="uq_company_item_sku"
+                                )
+        ]
 
     def __str__(self):
         return self.name
@@ -669,7 +694,10 @@ class BankAccount(models.Model): # Represents bank account company maintains
 
     class Meta:
         # A company cannot have two accounts with the same name
-        unique_together = ("company", "name")
+        constraints = [
+          models.UniqueConstraint(fields=["company", "name"], 
+                                  name="uq_company_bankaccount_name"),
+        ]
         # Indexed for fast lookup
         indexes = [models.Index(fields=["company", "name"])]
 
@@ -932,7 +960,11 @@ class EntityMembership(models.Model): # Bridge table (or a "join model") between
 
     class Meta:
         # one user can only have one membership per company (prevents duplicates)
-        unique_together = ("user", "company")
+        constraints = [
+          models.UniqueConstraint(fields=["user", "company"], 
+                                  name="uq_user_company_membership"),
+        ]
+
         # make lookups fast (important since almost every query will filter by company)
         indexes = [
             models.Index(fields=["company", "user"]),
