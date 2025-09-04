@@ -93,6 +93,12 @@ class CompanyAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug") # enable search by name and slug
     ordering = ("name",)             # sort companies alphabetically by default
 
+    # Fetch all memberships and their users in bulk
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.prefetch_related("memberships__user")
+        """ Django “stitches” memberships and users back onto each company """
+
 # Register `AccountCategory` model 
 @admin.register(models.AccountCategory)
 class AccountCategoryAdmin(admin.ModelAdmin):
@@ -191,8 +197,11 @@ class JournalEntryAdmin(admin.ModelAdmin):
     # Fetch everything in one SQL join
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related("company", "created_by")
-   
+        return qs.select_related("company", 
+                                 "created_by").prefetch_related("journalline_set__account")
+        """ For each JournalEntry, prefetch all its JournalLines, and 
+            within those lines also prefetch their linked Account objects."""
+
     """ Computed column for balance check """
     def balanced(self, obj): # Show total debits / total credits for each journal
         # check if entries balance with `compute_totals()` (model method)
@@ -246,8 +255,12 @@ class InvoiceAdmin(admin.ModelAdmin):
     # Fetch everything in one SQL join
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related("company", "customer")
-
+        return qs.select_related("company", "customer").prefetch_related(
+            "invoiceline_set__item", 
+            "invoiceline_set__account"
+        )
+        """ For each Invoice, prefetch all its InvoiceLines, and 
+            within those lines also prefetch their linked Item & Account objects."""
 
 # Register `InvoiceLine` model
 @admin.register(models.InvoiceLine)
@@ -272,7 +285,12 @@ class BillAdmin(admin.ModelAdmin):
     # Fetch everything in one SQL join
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related("company", "vendor")
+        return qs.select_related("company", "vendor").prefetch_related(
+            "billline_set__item",
+            "billline_set__account"
+        )
+        """ For each Bill, prefetch all its BillLines, and 
+            within those lines also prefetch their linked Item & Account objects."""
 
 # Register `BillLine` model
 @admin.register(models.BillLine)
@@ -301,7 +319,14 @@ class BankTransactionAdmin(admin.ModelAdmin):
     # Fetch everything in one SQL join
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related("company", "bank_account")
+        return qs.select_related("company", "bank_account").prefetch_related(
+            "banktransactioninvoice_set__invoice", # all invoices for each BT
+            "banktransactionbill_set__bill"        # all bills for each BT
+        )
+        """  
+        When you load invoices/bills for each bank transaction, 
+        also grab linked Invoice/Bill row at the same time.
+        """
 
 # Register `BankTransactionInvoice` model
 @admin.register(models.BankTransactionInvoice)
