@@ -586,6 +586,15 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
         # Speed up queries like “all lines for this invoice.”
         indexes = [models.Index(fields=["company", "invoice"])]
 
+        # Ensure quantity & unit_price are never negative
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(quantity__gte=0) & 
+                      models.Q(unit_price__gte=0),
+                name="non_negative_amounts",
+            ),
+        ]
+
     def save(self, *args, **kwargs):
         # Automatically calculate line_total before saving
         self.line_total = (self.quantity or 0) * (self.unit_price or 0)
@@ -674,6 +683,15 @@ class BillLine(models.Model): # Detail line represents individual items/services
         # For fast lookups of all lines on a given bill
         indexes = [models.Index(fields=["company", "bill"])]
 
+        # Ensure quantity & unit_price are never negative
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(quantity__gte=0) & 
+                      models.Q(unit_price__gte=0),
+                name="non_negative_amounts",
+            ),
+        ]
+
     def save(self, *args, **kwargs):
         # Automatically calculate line_total on save
         self.line_total = (self.quantity or 0) * (self.unit_price or 0)
@@ -741,13 +759,19 @@ class BankTransactionInvoice(models.Model): # Bridge table for applying bank tra
         indexes = [models.Index(fields=["company", "bank_transaction"]), 
                    models.Index(fields=["company", "invoice"])]
         
-        # Each bank transaction can be linked to the same invoice only once
+        
         constraints = [
+            # Each bank transaction can be linked to the same invoice only once
             models.UniqueConstraint(
                                     fields=["bank_transaction", "invoice"], 
                                     name="unique_bank_tx_invoice"
-                                )
-        ]
+                                ),
+            # Ensure applied_amount is never negative                    
+            models.CheckConstraint(
+                                    check=models.Q(applied_amount__gte=0),
+                                    name="non_negative_amounts",
+                                ),
+            ]
 
  
 class BankTransactionBill(models.Model): # Bridge table for applying bank transactions to bills (AP settlements)
@@ -762,12 +786,17 @@ class BankTransactionBill(models.Model): # Bridge table for applying bank transa
     objects = TenantManager() 
 
     class Meta:
-        # Prevent duplicate application of the same bank transaction to the same bill
         constraints = [
+            # Prevent duplicate application of the same bank transaction to the same bill
             models.UniqueConstraint(
                 fields=["bank_transaction", "bill"], 
                 name="unique_bank_tx_bill"
-                )
+                ),
+            # Ensure applied_amount is never negative                    
+            models.CheckConstraint(
+                                    check=models.Q(applied_amount__gte=0),
+                                    name="non_negative_amounts",
+                                ),
         ]
 
 
@@ -831,11 +860,25 @@ class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot us
     objects = TenantManager() 
     
     class Meta:
-        # Ensure you don’t store duplicate snapshots for the same account/date
-        unique_together = ("company", "account", "snapshot_date")
         # Optimize queries like: “Get all account balances for Company A on 2025-08-31.”
         indexes = [models.Index(fields=["company", "snapshot_date"])]
 
+        constraints = [
+            # Ensure balances are never negative 
+            # unless your reporting intentionally allows negatives
+            models.CheckConstraint(
+                check=(
+                    models.Q(debit_balance__gte=0) & 
+                    models.Q(credit_balance__gte=0)
+                ),
+                name="non_negative_amounts"
+            ),
+            # Ensure you don’t store duplicate snapshots for the same account/date
+            models.UniqueConstraint(
+                                    fields=["company", "account", "snapshot_date"], 
+                                    name="uq_company_account_snapshot_date"
+                                )
+        ]
 
 # ---------- Audit / Event log ----------
 class AuditLog(models.Model): # Gives accountability and traceability across whole system
