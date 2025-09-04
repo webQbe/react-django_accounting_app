@@ -150,12 +150,25 @@ class CustomerAdmin(admin.ModelAdmin):
     search_fields = ("name", "contact_email")
     list_filter = ("company",)
 
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        # Join related tables in initial query
+        return qs.select_related("company", "default_ar_account")
+        """ Now Django won’t do a separate query for each company and default_ar_account 
+            while rendering the list. """
+
 # Register `Vendor` model 
 @admin.register(models.Vendor)
 class VendorAdmin(admin.ModelAdmin):
     list_display = ("id", "company", "name", "contact_email", "payment_terms_days", "default_ap_account")
     search_fields = ("name",)
     list_filter = ("company",)
+
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "default_ap_account")
 
 # Register `Item` model 
 @admin.register(models.Item)
@@ -175,6 +188,11 @@ class JournalEntryAdmin(admin.ModelAdmin):
     inlines = [JournalLineInline]                 # allows editing JournalLines directly on JournalEntry page
     actions = [post_journal_entries]              # adds a bulk action (“Post selected journal entries”) to list view
 
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "created_by")
+   
     """ Computed column for balance check """
     def balanced(self, obj): # Show total debits / total credits for each journal
         # check if entries balance with `compute_totals()` (model method)
@@ -225,12 +243,23 @@ class InvoiceAdmin(admin.ModelAdmin):
     search_fields = ("invoice_number", "customer__name")
     inlines = [InvoiceLineInline]
 
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "customer")
+
+
 # Register `InvoiceLine` model
 @admin.register(models.InvoiceLine)
 class InvoiceLineAdmin(admin.ModelAdmin):
     list_display = ("id", "company", "invoice", "item", "line_total", "account")
     list_filter = ("company",)
     search_fields = ("description",)
+
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "invoice", "item")
 
 # Register `Bill` model
 @admin.register(models.Bill)
@@ -240,11 +269,21 @@ class BillAdmin(admin.ModelAdmin):
     search_fields = ("bill_number", "vendor__name")
     inlines = [BillLineInline]
 
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "vendor")
+
 # Register `BillLine` model
 @admin.register(models.BillLine)
 class BillLineAdmin(admin.ModelAdmin):
-    list_display = ("id", "company", "bill", "line_total", "account")
+    list_display = ("id", "company", "bill", "item", "line_total", "account")
     search_fields = ("description",)
+
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "bill", "item")
 
 # Register `BankAccount` model
 @admin.register(models.BankAccount)
@@ -259,6 +298,11 @@ class BankTransactionAdmin(admin.ModelAdmin):
     list_filter = ("company", "bank_account", "payment_method", "payment_date")
     inlines = [BankTransactionInvoiceInline]
 
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "bank_account")
+
 # Register `BankTransactionInvoice` model
 @admin.register(models.BankTransactionInvoice)
 class BankTransactionInvoiceAdmin(admin.ModelAdmin):
@@ -266,12 +310,22 @@ class BankTransactionInvoiceAdmin(admin.ModelAdmin):
     list_filter = ("company", "bank_transaction")
     search_fields = ("invoice__invoice_number",)
 
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "bank_transaction", "invoice")
+
 # Register `BankTransactionBill` model
 @admin.register(models.BankTransactionBill)
 class BankTransactionBillAdmin(admin.ModelAdmin):
     list_display = ("id", "company", "bank_transaction", "bill", "applied_amount")
     list_filter = ("company", "bank_transaction")
     search_fields = ("bill__bill_number",)
+
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "bank_transaction", "bill")
 
 # Register `FixedAsset` model
 @admin.register(models.FixedAsset)
@@ -286,6 +340,11 @@ class AccountBalanceSnapshotAdmin(admin.ModelAdmin):
     list_display = ("id", "company", "account", "snapshot_date", "debit_balance", "credit_balance")
     list_filter = ("company", "snapshot_date")
 
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "account")
+
 # Register `AuditLog` model
 @admin.register(models.AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
@@ -293,6 +352,10 @@ class AuditLogAdmin(admin.ModelAdmin):
     search_fields = ("object_type", "object_id", "user__username")
     list_filter = ("company", "action", "created_at")
 
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "user")
 
 # Register `Currency` model
 @admin.register(models.Currency)
@@ -314,6 +377,11 @@ class EntityMembershipAdmin(admin.ModelAdmin):
     search_fields = ("user__username", "user__email", "company__name")
     readonly_fields = ("created_at",) # prevent tampering with creation date
     ordering = ("company__name", "user__username")
+
+    # Fetch everything in one SQL join
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("company", "user")
 
     # Scope querysets by company
     # prevents someone from snooping into memberships of other companies
