@@ -145,6 +145,7 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
         indexes = [ # Optimize queries
             models.Index(fields=["company", "ac_type"]), # For reports grouped by ac_type (Trial Balance, P&L, Balance Sheet)
             models.Index(fields=["company", "code"]),    # For looking up accounts by code
+            models.Index(fields=["company", "parent"]),  # Sub-accounts by parent account
         ]
 
         """ Each company defines its own chart of accounts. 
