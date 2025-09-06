@@ -724,7 +724,10 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
 
     class Meta:
         # Speed up queries like “all lines for this invoice.”
-        indexes = [models.Index(fields=["company", "invoice"])]
+        indexes = [
+                   models.Index(fields=["company", "invoice"]),
+                   models.Index(fields=["company", "account"])
+                ]
 
         # Ensure quantity & unit_price are never negative
         constraints = [
