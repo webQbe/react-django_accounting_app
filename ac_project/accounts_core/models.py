@@ -503,6 +503,19 @@ class JournalEntry(models.Model): # Represents one accounting transaction
             # Reject save
             raise ValidationError("Cannot create or edit journal inside a closed period.")
 
+    def save(self, *args, **kwargs):
+        if self.pk: # Does this row already exist in DB?
+            # Fetch "original" row to update
+            orig = JournalEntry.objects.get(pk=self.pk) 
+            # Check if journal was already posted   
+            if orig.status == "posted" and self.status != "posted":
+                # disallow toggling posted flag
+                raise ValidationError("Cannot unpost a posted journal")
+                """ If self.status != "posted" → the user is trying to change status 
+                    back to "draft" (or anything else). """  
+            
+        # If validation passes, continue with normal save
+        super().save(*args, **kwargs)
 
 class JournalLine(models.Model): # Stores Lines ( credits / debits )
     """
