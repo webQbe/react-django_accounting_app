@@ -160,6 +160,29 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
         # Make accounts readable in the Django admin and debugging
         return f"{self.company.slug}:{self.code} – {self.name}" 
         # Example: "acme:1000 – Cash on Hand".
+
+    def clean(self):
+        """ Enforce company consistency (multi-tenancy) """
+        # Check if category belongs to same company
+        if self.category and self.category.company != self.company:
+            raise ValidationError("AccountCategory must belong to the same company as Account.")
+
+    def save(self, *args, **kwargs):
+        """ Enforce business immutability (can’t disable accounts used in journal lines) """
+        # Prevent disabling if used in journals
+        if not self.pk: 
+            # If no primary key → this is a new object → just save (no need for checks)
+            return super().save(*args, **kwargs)
+        # Fetch the previous version of account from DB
+        old = Account.objects.filter(pk=self.pk).first()
+
+        # If account was active before, but now being set to inactive
+        if old and old.is_active and not self.is_active:
+            # check usage (referenced in transactions)
+            used = JournalLine.objects.filter(account=self).exists()
+            if used: # if referenced prevent from deactivating account 
+                raise ValidationError("Cannot disable an account that is used in journal lines.")
+        return super().save(*args, **kwargs)
     
 
 # ---------- Period (accounting period) ----------
@@ -205,6 +228,10 @@ class Period(models.Model): # Each Period represents a time bucket during which 
 
     def __str__(self):
         return f"{self.company.slug} {self.name}" # Example: "acme 2025-07".
+    
+    def clean(self):
+        if self.start_date >= self.end_date:
+            raise ValidationError("start_date must be before end_date")
 
 
 # ---------- Customers & Vendors ----------
@@ -325,7 +352,7 @@ class Item(models.Model): # Represents something a company sells & purchases
                                         )
     
     # Current stock level of the item
-    on_hand_qty = models.DecimalField(  
+    on_hand_quantity = models.DecimalField(  
                                         max_digits=14, decimal_places=4, # Allow precise tracking - supports large quantities with fractional amounts, e.g. liters.
                                         default=Decimal("0.0")           # Default = 0
                                     )
@@ -403,26 +430,78 @@ class JournalEntry(models.Model): # Represents one accounting transaction
     # Post the entry safely inside a database transaction
     def post(self, user=None):
         """
-            Model keeps pure business logic
-            - Ensure balanced debits/credits
-            - Mark as posted
+           Enforce accounting correctness (balanced, immutable, tenant-safe) and
+           Update snapshots
         """
         # lazy import to avoid circular import at module load time
         from .services import update_snapshots_for_journal
-        # Check for status
-        if self.status == "posted":
-                raise ValidationError("Already posted")
-        # Enforce balance before marking posted
-        if not self.is_balanced():
-                raise ValidationError("Journal entry not balanced: debit != credit")
-        self.status = "posted" # Once posted → lines become immutable
-        self.posted_at = timezone.now()
-        if user:
-                self.created_by = user
-        self.save()
 
-        # Update snapshots
-        update_snapshots_for_journal(self)
+        with transaction.atomic(): # Wrap whole posting process in a single DB transaction
+            # Lock all journal lines to prevent race conditions
+            # so no other transaction can modify them while posting is in progress
+            lines = JournalLine.objects.select_for_update().filter(journal=self)
+
+            """ Business validations """
+            if not lines.exists(): # Prevent posting an empty entry
+                raise ValidationError("JournalEntry must have at least one JournalLine.")
+
+            # Recompute totals fresh from DB & ignore any stale cached values
+            total_debit = Decimal('0.00')
+            total_credit = Decimal('0.00')
+            for l in lines:
+                total_debit += l.debit_amount or Decimal('0.00')
+                total_credit += l.credit_amount or Decimal('0.00')
+
+            # Enforce double-entry rule: debits = credits
+            if total_debit != total_credit:
+                raise ValidationError("Journal does not balance: debits != credits")
+
+            # Journals are immutable once posted. Prevent double posting
+            if self.status.posted:
+                raise ValidationError("Journal already posted")
+
+            # Enforces tenant consistency: 
+            # every line must belong to same company as journal
+            if lines.exclude(company=self.company).exists():
+                raise ValidationError("All journal lines must belong to same company as journal.")
+
+            # Ensure periods open
+            if self.period and self.period.is_closed:
+                raise ValidationError("Period is closed")
+            
+            
+            """ Update state """
+            self.status.posted = True # Mark journal as posted
+            self.posted_at = timezone.now() # Timestamp
+            self.save(update_fields=["status","posted_at"])
+
+        # Service layer function to trigger snapshot update
+        # Recalculates AccountBalanceSnapshot for all accounts affected by this journal
+        update_snapshots_for_journal(self) 
+
+
+    def clean(self):
+        """ Don't modify posted journals """
+        if self.pk and self.status.posted: # If it has a primary key and status is posted, it's an update
+            # Load original DB version before edits
+            orig = JournalEntry.objects.get(pk=self.pk)
+            # if attempting to change any core fields after posted
+            if orig.status.posted:
+                changed = False # allow no changes if posted (strict)
+                # compare changes in "description", "period_id" fields
+                for f in ("description", "period_id"):
+                    if getattr(orig, f) != getattr(self, f):
+                         # If they differ, then user is trying to change something after posting
+                        changed = True 
+                if changed:
+                    # Block the save with a ValidationError
+                    raise ValidationError("Cannot modify a posted JournalEntry. It is immutable.")
+
+        """ Don't allow journals in closed periods """
+        if self.period and self.period.is_closed:
+            # If journal is assigned to a period, and the period is marked closed
+            # Reject save
+            raise ValidationError("Cannot create or edit journal inside a closed period.")
 
 
 class JournalLine(models.Model): # Stores Lines ( credits / debits )
@@ -486,14 +565,40 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
         ]
 
     # Business logic validation: 
-    # each line must be either debit or credit, not both, not zero.
+    # - Debit/credit should always be non-negative
+    # - Prevent mixing payable and receivable logic on one line
+    # - Prevent “cross-company” contamination 
     def clean(self):
-        # ensure debit xor credit or both allowed? Usually one is zero.
+        # Ensures no negative values sneak in
+        # (redundant with CheckConstraint but useful at app-level)
+        if self.debit_amount < 0 or self.credit_amount < 0:
+            raise ValidationError("Debit and credit must be >= 0")
+        
+        # ensure debit xor credit or both allowed? 
+        # Usually one is zero.
         if (self.debit_amount > 0) and (self.credit_amount > 0):
             raise ValidationError("JournalLine should not have both debit and credit > 0")
         if (self.debit_amount == 0) and (self.credit_amount == 0):
             raise ValidationError("JournalLine requires a non-zero amount on either debit or credit")
+       
+        # Invoice and Bill cannot both be set
+        # A journal line can link to either an invoice or a bill, but never both
+        if self.invoice and self.bill:
+            raise ValidationError("JournalLine cannot reference both invoice and bill.")
         
+        # Company consistency
+        # Every line must belong to same company as its parent journal
+        if self.journal and self.company != self.journal.company:
+            raise ValidationError("JournalLine.company must equal JournalEntry.company")
+        # Ensure account chosen belongs to the same company
+        if self.account and self.account.company != self.company:
+            raise ValidationError("JournalLine.account must belong to the same company.")
+
+    # save() override    
+    def save(self, *args, **kwargs):
+        # clean()+field validation always run whenever you save a JournalLine programmatically
+        self.full_clean() 
+        return super().save(*args, **kwargs)
 
 # ---------- Invoices / InvoiceLines ----------
 class Invoice(models.Model): # Represents a customer invoice
@@ -550,6 +655,41 @@ class Invoice(models.Model): # Represents a customer invoice
         # If no invoice number, fall back to database ID
         return f"Inv {self.invoice_number or self.pk}"
 
+    """ Ensure invoice's stored totals are always in sync with its lines and payments """
+    def recalc_totals(self): # Recompute invoice totals every time
+        # Defined invoice FK with related_name="lines" on InvoiceLine model
+        lines = self.lines.all() # So, reverse relation `lines` auto-created on Invoice model
+        # Calculate sum of all InvoiceLine.line_totals
+        total = sum((l.line_total for l in lines), Decimal('0.00'))
+        self.total = total  # Set total
+        
+        # Sum of all applied payments
+        paid = sum(bt.applied_amount for bt in BankTransactionInvoice.objects.filter(invoice=self))
+       
+        # Calculate outstanding_amount = total - sum(payments applied)
+        # if payments overshoot for any reason, it caps at 0, not negative
+        self.outstanding_amount = max(total - paid, Decimal('0.00'))
+
+    """ Prevent “dirty totals” or “negative receivables” from persisting """
+    def save(self, *args, **kwargs):
+        # Recompute before saving
+        self.recalc_totals()
+        # ensure outstanding_amount non-negative
+        if self.outstanding_amount < 0:
+            # important, otherwise credits/payments could accidentally 
+            # overpay an invoice and mess up reporting
+            raise ValidationError("Outstanding amount cannot be negative")
+        # Then saves normally
+        super().save(*args, **kwargs)
+
+    """ Prevent deleting invoices that already have payments applied """
+    def delete(self, *args, **kwargs):
+        has_payments = BankTransactionInvoice.objects.filter(invoice=self).exists()
+        if has_payments:
+            raise ValidationError("Cannot delete an invoice with applied payments.")
+            # Void or credit an invoice, instead of deleting it outright
+        return super().delete(*args, **kwargs)
+
 
 class InvoiceLine(models.Model): # Each line describes a product/service sold on the invoice
     
@@ -595,10 +735,29 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
             ),
         ]
 
+    """ Ensure individual line amounts are valid """
+    def clean(self):
+        if self.quantity < 0: # Quantity must be non-negative
+            raise ValidationError("Quantity must be >= 0")
+        if self.unit_price < 0: # Unit price must be non-negative
+            raise ValidationError("Unit price must be >= 0")
+        
+        # line_total must equal quantity * unit_price
+        expected = (self.quantity or Decimal('0')) * (self.unit_price or Decimal('0'))
+        if self.line_total != expected: # If it doesn’t, it recalculates (self-healing)
+            self.line_total = expected 
+
+        # Tenant safety check
+        if self.invoice and self.company != self.invoice.company:
+            # every line must belong to the same company as its invoice
+            raise ValidationError("InvoiceLine.company must match Invoice.company")
+
+    """ Ensure no inconsistent invoice line can ever be persisted """
     def save(self, *args, **kwargs):
-        # Automatically calculate line_total before saving
+        # Force line_total to be recomputed before save, regardless of input
         self.line_total = (self.quantity or 0) * (self.unit_price or 0)
-        super().save(*args, **kwargs)
+        self.full_clean() # Run all validations in clean() again
+        return super().save(*args, **kwargs) # Then finally save
 
 
 # ---------- Bills / BillLines ----------
@@ -648,6 +807,41 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
                                 )
         ]
 
+    """ Ensure bill's stored totals are always in sync with its lines and payments """
+    def recalc_totals(self): # Recompute bill totals every time
+        # Defined bill FK with related_name="lines" on BillLine model
+        lines = self.lines.all() # So, reverse relation `lines` auto-created on Bill model
+        # Calculate sum of all BillLine.line_totals
+        total = sum((l.line_total for l in lines), Decimal('0.00'))
+        self.total = total  # Set total
+        
+        # Sum of all applied payments
+        paid = sum(bt.applied_amount for bt in BankTransactionBill.objects.filter(bill=self))
+       
+        # Calculate outstanding_amount = total - sum(payments applied)
+        # if payments overshoot for any reason, it caps at 0, not negative
+        self.outstanding_amount = max(total - paid, Decimal('0.00'))
+
+    """ Prevent “dirty totals” or “negative receivables” from persisting """
+    def save(self, *args, **kwargs):
+        # Recompute before saving
+        self.recalc_totals()
+        # ensure outstanding non-negative
+        if self.outstanding_amount < 0:
+            # important, otherwise credits/payments could accidentally 
+            # overpay a bill and mess up reporting
+            raise ValidationError("Outstanding amount cannot be negative")
+        # Then save normally
+        super().save(*args, **kwargs)
+
+    """ Prevent deleting bills that already have payments applied """
+    def delete(self, *args, **kwargs):
+        has_payments = BankTransactionBill.objects.filter(bill=self).exists()
+        if has_payments:
+            raise ValidationError("Cannot delete a bill with applied payments.")
+            # Void or credit an bill, instead of deleting it outright
+        return super().delete(*args, **kwargs)
+
 class BillLine(models.Model): # Detail line represents individual items/services on the bill
    
    # Belongs to both a company and its parent bill
@@ -692,10 +886,30 @@ class BillLine(models.Model): # Detail line represents individual items/services
             ),
         ]
 
+    
+    """ Ensure individual line amounts are valid """
+    def clean(self):
+        if self.quantity < 0: # Quantity must be non-negative
+            raise ValidationError("Quantity must be >= 0")
+        if self.unit_price < 0: # Unit price must be non-negative
+            raise ValidationError("Unit price must be >= 0")
+        
+        # line_total must equal quantity * unit_price
+        expected = (self.quantity or Decimal('0')) * (self.unit_price or Decimal('0'))
+        if self.line_total != expected: # If it doesn’t, it recalculates (self-healing)
+            self.line_total = expected 
+
+        # Tenant safety check
+        if self.bill and self.company != self.bill.company:
+            # every line must belong to the same company as its bill
+            raise ValidationError("BillLine.company must match Bill.company")
+
+    """ Ensure no inconsistent bill line can ever be persisted """
     def save(self, *args, **kwargs):
-        # Automatically calculate line_total on save
+        # Force line_total to be recomputed before save, regardless of input
         self.line_total = (self.quantity or 0) * (self.unit_price or 0)
-        super().save(*args, **kwargs)
+        self.full_clean() # Run all validations in clean() again
+        return super().save(*args, **kwargs) # Then finally save
 
 # ---------- Banking ----------
 
@@ -743,6 +957,24 @@ class BankTransaction(models.Model): # Represents single inflow/outflow in a ban
                     models.Index(fields=["company", "payment_date"])
                 ]
 
+    def clean(self): # auto-runs when you call full_clean() before saving
+        # Currency check
+        # Prevent mixing currencies in the same account ledger
+        if self.currency_code != self.bank_account.currency_code:
+            raise ValidationError("Transaction currency must match bank account currency")
+        
+        # Applied amount check - ensure sum of applied <= amount
+        # Find all join rows 
+        # where this bank transaction was applied against invoices
+        applied = BankTransactionInvoice.objects.filter(bank_transaction=self).aggregate(
+            total=models.Sum("applied_amount")
+        )["total"] or Decimal('0')
+
+        # Prevent over-allocation: 
+        # you can’t apply more than actual bank transaction’s amount
+        if applied > self.amount:
+            raise ValidationError("Applied payments exceed bank transaction amount")
+        
 
 class BankTransactionInvoice(models.Model): # Bridge table for applying bank transactions to invoices (AR settlements)
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
@@ -772,6 +1004,22 @@ class BankTransactionInvoice(models.Model): # Bridge table for applying bank tra
                                     name="non_negative_amounts",
                                 ),
             ]
+        
+    def clean(self):
+        # You can’t apply negative payment
+        if self.applied_amount < 0: 
+            raise ValidationError("Applied must be non-negative")
+        
+        # cannot apply more than outstanding
+        # prevent “overpayment” situations where invoice would go negative
+        if self.applied_amount > self.invoice.outstanding_amount:
+            raise ValidationError("Applied amount cannot exceed invoice outstanding")
+        
+        # Prevent cross-company contamination
+        """ You can't accidentally link a BankTransaction 
+            from Company A to an Invoice from Company B. """
+        if self.invoice.company != self.bank_transaction.company:
+            raise ValidationError("Invoice and BankTransaction must belong to same company")
 
  
 class BankTransactionBill(models.Model): # Bridge table for applying bank transactions to bills (AP settlements)
@@ -798,6 +1046,22 @@ class BankTransactionBill(models.Model): # Bridge table for applying bank transa
                                     name="non_negative_amounts",
                                 ),
         ]
+
+    def clean(self):
+        # You can’t apply negative payment
+        if self.applied_amount < 0: 
+            raise ValidationError("Applied must be non-negative")
+        
+        # cannot apply more than outstanding
+        # prevent “overpayment” situations where bill would go negative
+        if self.applied_amount > self.bill.outstanding_amount:
+            raise ValidationError("Applied amount cannot exceed bill outstanding")
+        
+        # Prevent cross-company contamination
+        """ You can't accidentally link a BankTransaction 
+            from Company A to an Bill from Company B. """
+        if self.bill.company != self.bank_transaction.company:
+            raise ValidationError("Bill and BankTransaction must belong to same company")
 
 
 # ---------- Fixed Assets ----------
@@ -838,6 +1102,16 @@ class FixedAsset(models.Model): # tracks long-term assets and handle depreciatio
     def __str__(self):
         # Return description when you print an asset in Django shell/admin
         return self.description
+    
+    def clean(self):
+        # Prevent assets from being marked as depreciable when their lifespan hasn’t been set
+        # Without a positive number of years, depreciation makes no sense
+        if self.depreciation_method and (not self.useful_life_years or self.useful_life_years <= 0):
+            raise ValidationError("Useful life must be > 0 if depreciation method is set")
+        
+        # Purchase cost cannot be negative
+        if self.purchase_cost < 0:
+            raise ValidationError("Purchase cost must be >= 0")
 
 # ---------- Account Balance Snapshot (optional materialized) ----------
 class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot used for reporting performance
@@ -1017,3 +1291,13 @@ class EntityMembership(models.Model): # Bridge table (or a "join model") between
     def __str__(self):
         # Make debugging/admin easier
         return f"{self.user} @ {self.company} ({self.role})"
+
+    def clean(self):
+        if self.user and self.user.default_company:
+            # Get user's memberships using `user` FK (related name = memberships)
+            valid_company_ids = self.user.memberships.values_list("company", flat=True)
+            # Check default company is among user’s memberships
+            if self.user.default_company not in valid_company_ids:
+                raise ValidationError(
+                    f"Default company {self.user.default_company} must be one of user's memberships."
+                )
