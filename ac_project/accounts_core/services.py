@@ -194,3 +194,24 @@ def update_snapshots_for_journal(journal: JournalEntry):
         snapshot.debit_balance += line.debit_amount or 0 # don’t try to add None
         snapshot.credit_balance += line.credit_amount or 0
         snapshot.save() # Save updated snapshot
+
+
+
+# ------------------------------------
+# Invoice status update workflows
+# ------------------------------------
+"""Move invoice from draft → open (after validation)."""
+def open_invoice(invoice: Invoice):
+    if not invoice.lines.exists():
+        # an invoice shouldn’t move out of draft without at least one line item
+        raise ValidationError("Cannot open invoice with no lines")
+    invoice.transition_to("open") 
+    return invoice
+
+"""Move invoice from open → paid (only when outstanding == 0)."""
+def pay_invoice(invoice: Invoice):
+    if invoice.outstanding != 0:
+        # Otherwise, you’d be marking unpaid invoices as paid.
+        raise ValidationError("Cannot mark invoice as paid until fully settled")
+    invoice.transition_to("paid") 
+    return invoice

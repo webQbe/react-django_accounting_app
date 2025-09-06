@@ -703,6 +703,22 @@ class Invoice(models.Model): # Represents a customer invoice
             # Void or credit an invoice, instead of deleting it outright
         return super().delete(*args, **kwargs)
 
+    def transition_to(self, new_status):
+        # Current state vs. allowed next states
+        allowed = {
+            "draft": ["open"],
+            "open": ["paid"],
+            "paid": []          # "paid" → (no further transitions)
+        }
+        # Look up what states are allowed from current self.status
+        if new_status not in allowed.get(self.status, []):
+            # If requested new_status isn’t allowed → block it
+            raise ValidationError(f"Cannot go from {self.status} to {new_status}")
+        
+        # If valid, update self.status and persist with .save()
+        self.status = new_status
+        self.save()
+
 
 class InvoiceLine(models.Model): # Each line describes a product/service sold on the invoice
     
