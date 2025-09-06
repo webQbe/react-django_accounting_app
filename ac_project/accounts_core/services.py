@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from decimal import Decimal
 from django.db import models
 from django.apps import apps
-from typing import Any
+from typing import Any, List, Dict
 
 # Import models
 from .models import (
@@ -49,7 +49,7 @@ def apply_payment(bt_id: int, invoice_id: int, amount: float):
 
         # Validate bank transaction remaining capacity
         total_applied = (
-            bt.banktransactioninvoice_set.aggregate(total=models.Sum("applied_amount"))["total"] or 0
+            bt.banktransactioninvoice_set.aggregate(total=models.Sum("applied_amount"))["total"] or Decimal("0")
         )
 
         # Validation: prevent over-allocation
@@ -80,6 +80,24 @@ def apply_payment(bt_id: int, invoice_id: int, amount: float):
         bt.save(update_fields=["status"])
 
         return bt, inv
+    
+def apply_bank_tx(bank_tx_id: int, invoice_applications: List[Dict]):
+    """
+    Apply one bank transaction across multiple invoices atomically.
+    Delegates each allocation to apply_payment().
+    """
+    with transaction.atomic():
+        results = []
+        for ap in invoice_applications: # Loop over each application (list of dicts)
+            # Pull out invoice’s ID and amount to apply 
+            invoice_id = ap["invoice_id"]
+            amount = ap["amount"]
+            # Call apply_payment() for each invoice
+            # Get updated BankTransaction and Invoice
+            bt, inv = apply_payment(bank_tx_id, invoice_id, amount)
+            # Add updated objects into results list
+            results.append((bt, inv))
+        return results
 
 
 # ----------------------------
