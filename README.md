@@ -149,35 +149,51 @@ rm db.sqlite3
 find . -path "*/migrations/*.py" -not -name "__init__.py" -delete
 ```
 
-#### 2. Create initial migrations for your app
+#### 2. Make sure your custom user is active
+
+- Add to `settings.py`:
+```bash
+AUTH_USER_MODEL = "accounts_core.User"
+```
+
+#### 3. Create initial migrations for your app
 
 Run:
 ```bash
 python manage.py makemigrations accounts_core
 ```
 
-#### 3. Apply them in the right order
+#### 4. Apply them in the right order
 
 Run:
 ```bash
 python manage.py migrate
 ```
 
-#### 4. Make the user manager (`TenantManager()`) inherits from `BaseUserManager`
+#### 5. Make the user manager (`TenantManager()`) inherits from `BaseUserManager`
 
 - Make sure custom user model's manager subclasses `django.contrib.auth.base_user.BaseUserManager` (this gives you `get_by_natural_key` and the usual `create_user` / `create_superuser` behavior).
 
-#### 5. Create a superuser
+#### 6. Create a superuser
 
 Run:
 ```bash
 python manage.py createsuperuser
 ```
 
-#### 6. See and manage models in Django Admin
+#### 7. Try it out
+
+1. Start the dev server
 Run:
 ```bash
 python manage.py runserver
 ```
-
-Log in at `http://127.0.0.1:8000/admin/`.
+2. Log into Admin:
+    - Open `http://127.0.0.1:8000/admin/`
+    - Log in with the superuser you just created.
+    - You should see all the models you registered in `admin.py`.
+3. Create a Company
+4. Add a Currency
+5. Add a Customer tied to that company.
+6. Try creating an Invoice — `clean()` and `save()` methods will enforce rules 
+  *(e.g., no negative totals, no deleting invoices with payments, etc.).*
