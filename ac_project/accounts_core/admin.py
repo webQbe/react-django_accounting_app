@@ -186,7 +186,7 @@ class VendorAdmin(admin.ModelAdmin):
 # Register `Item` model 
 @admin.register(models.Item)
 class ItemAdmin(admin.ModelAdmin):
-    list_display = ("id", "company", "sku", "name", "on_hand_qty")
+    list_display = ("id", "company", "sku", "name", "on_hand_quantity")
     search_fields = ("sku", "name")
     list_filter = ("company",)
 

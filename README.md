@@ -134,3 +134,50 @@ celery -A ac_project worker -B -l info
 ✅ Now Celery Beat will fire your task, and the Celery worker will execute it.
 
 
+
+### Set up Django Admin to view and manage models
+
+#### 1. Register models in `admin.py`
+- This makes both models appear in the Admin sidebar.
+
+
+#### Delete broken migration history (Optional)
+
+Run:
+```bash
+rm db.sqlite3
+find . -path "*/migrations/*.py" -not -name "__init__.py" -delete
+```
+
+#### 2. Create initial migrations for your app
+
+Run:
+```bash
+python manage.py makemigrations accounts_core
+```
+
+#### 3. Apply them in the right order
+
+Run:
+```bash
+python manage.py migrate
+```
+
+#### 4. Make the user manager (`TenantManager()`) inherits from `BaseUserManager`
+
+- Make sure custom user model's manager subclasses `django.contrib.auth.base_user.BaseUserManager` (this gives you `get_by_natural_key` and the usual `create_user` / `create_superuser` behavior).
+
+#### 5. Create a superuser
+
+Run:
+```bash
+python manage.py createsuperuser
+```
+
+#### 6. See and manage models in Django Admin
+Run:
+```bash
+python manage.py runserver
+```
+
+Log in at `http://127.0.0.1:8000/admin/`.

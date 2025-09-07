@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError  # Built-in way to raise vali
 from django.db import models, transaction           # To wrap operations in a DB transaction
 from django.utils import timezone                   # Timezone-aware datetime helper
 from django.contrib.auth.models import AbstractUser
-from managers import TenantManager  # To enforce tenant scoping   
+from .managers import TenantManager  # To enforce tenant scoping   
 
 # Choice Lists
 AC_TYPES = [
@@ -265,8 +265,8 @@ class Customer(models.Model): # Represents client who receives invoices (AR side
                             on_delete=models.SET_NULL,
 
                             # Make reverse lookups possible
+                            # i.e., which customers use this AR account as default
                             related_name="customers_default_ar"
-                            """ i.e., which customers use this AR account as default. """
                         )
 
     # Enforce tenant scoping
@@ -573,7 +573,7 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
                     models.Q(credit_amount__gte=0)
                     # Django reuses Q objects to build SQL conditions for constraints
                 ),
-                name="non_negative_amounts"
+                name="jl_non_negative_amounts"
             ),
         ]
 
@@ -763,7 +763,7 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
             models.CheckConstraint(
                 check=models.Q(quantity__gte=0) & 
                       models.Q(unit_price__gte=0),
-                name="non_negative_amounts",
+                name="invl_non_negative_amounts",
             ),
         ]
 
@@ -914,7 +914,7 @@ class BillLine(models.Model): # Detail line represents individual items/services
             models.CheckConstraint(
                 check=models.Q(quantity__gte=0) & 
                       models.Q(unit_price__gte=0),
-                name="non_negative_amounts",
+                name="bl_non_negative_amounts",
             ),
         ]
 
@@ -1033,7 +1033,7 @@ class BankTransactionInvoice(models.Model): # Bridge table for applying bank tra
             # Ensure applied_amount is never negative                    
             models.CheckConstraint(
                                     check=models.Q(applied_amount__gte=0),
-                                    name="non_negative_amounts",
+                                    name="bt_inv_non_negative_amounts",
                                 ),
             ]
         
@@ -1075,7 +1075,7 @@ class BankTransactionBill(models.Model): # Bridge table for applying bank transa
             # Ensure applied_amount is never negative                    
             models.CheckConstraint(
                                     check=models.Q(applied_amount__gte=0),
-                                    name="non_negative_amounts",
+                                    name="bt_bill_non_negative_amounts",
                                 ),
         ]
 
@@ -1177,7 +1177,7 @@ class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot us
                     models.Q(debit_balance__gte=0) & 
                     models.Q(credit_balance__gte=0)
                 ),
-                name="non_negative_amounts"
+                name="ab_snap_non_negative_amounts"
             ),
             # Ensure you don’t store duplicate snapshots for the same account/date
             models.UniqueConstraint(
@@ -1257,6 +1257,11 @@ class User(AbstractUser): # Replace built-in user with custom user to add add ex
 
     # Enforce tenant scoping
     objects = TenantManager() 
+
+    """     
+        User.objects.create_user → makes a normal user.
+        User.objects.create_superuser → makes a superuser (used by python manage.py createsuperuser)
+    """
 
     # Controls how user is displayed
     def __str__(self):
