@@ -215,3 +215,27 @@ def pay_invoice(invoice: Invoice):
         raise ValidationError("Cannot mark invoice as paid until fully settled")
     invoice.transition_to("paid") 
     return invoice
+
+""" Apply payment and transition statuses safely """
+def apply_and_update_status(bt_id, invoice_id, amount):
+
+    with transaction.atomic():
+        bt, inv = apply_payment(bt_id, invoice_id, amount)
+
+        """ update invoice status if needed """
+        if inv.outstanding_amount == 0:
+            inv.transition_to("paid")
+        elif inv.status == "draft":
+            inv.transition_to("open")
+
+        """  update bank transaction status """
+        # Call BankTransaction.applied_total() 
+        # to find how much of this transaction has been applied to invoices
+        if bt.applied_total() == 0:
+            bt.transition_to("unapplied")
+        elif bt.applied_total() < bt.amount:
+            bt.transition_to("partially_applied")
+        else:
+            bt.transition_to("fully_applied")
+
+        return bt, inv

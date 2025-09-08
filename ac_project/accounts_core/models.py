@@ -39,6 +39,12 @@ PAYMENT_METHODS = [
     ("other", "Other"),
 ]
 
+BT_STATUS_CHOICES = [
+        ("unapplied", "Unapplied"),
+        ("partially_applied", "Partially applied"),
+        ("fully_applied", "Fully applied"),
+    ]
+
 # ---------- Tenant / Company ----------
 class Company(models.Model):
     """Tenant / Organization""" 
@@ -1008,6 +1014,7 @@ class BankTransaction(models.Model): # Represents single inflow/outflow in a ban
     amount = models.DecimalField(max_digits=18, decimal_places=2)
     currency_code = models.CharField(max_length=10, default="USD")
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default="bank_transfer")
+    status = models.CharField(max_length=20, choices=BT_STATUS_CHOICES, default="unapplied") # other statuses: partially_applied, fully_applied
     reference = models.CharField(max_length=200, null=True, blank=True)
     
     # Enforce tenant scoping
@@ -1041,7 +1048,47 @@ class BankTransaction(models.Model): # Represents single inflow/outflow in a ban
             
     # Show something human-readable in Django Admin
     def __str__(self):
-        return f"{self.bank_account.name} - {self.payment_date} - {self.amount} {self.currency_code}"
+        return f"{self.bank_account.name} - {self.payment_date} - {self.amount} {self.currency_code} ({self.status})"
+
+    """How much of this transaction has been applied to invoices?"""
+    def applied_total(self):
+        return (
+            self.banktransactioninvoice_set.aggregate(
+                total=models.Sum("applied_amount")
+            )["total"] or Decimal("0.00")
+        )
+
+
+    def transition_to(self, new_status):
+        # Current state vs. allowed next states
+        allowed = {
+            "unapplied": ["partially_applied", "fully_applied"],
+            "partially_applied": ["fully_applied"],
+            "fully_applied": []       # "fully_applied" → (no further transitions)
+        }
+        # Look up what states are allowed from current self.status
+        if new_status not in allowed.get(self.status, []):
+            # If requested new_status isn’t allowed → block it
+            raise ValidationError(f"Cannot go from {self.status} to {new_status}")
+        
+        applied = self.applied_total()
+
+        if new_status == "partially_applied":
+            if applied <= 0 or applied >= self.amount:
+                raise ValidationError(
+                    f"Cannot mark as partially_applied: applied={applied}, amount={self.amount}"
+                )
+            
+        if new_status == "fully_applied":
+            if applied != self.amount:
+                raise ValidationError(
+                    f"Cannot mark as fully_applied: applied={applied}, amount={self.amount}"
+                )
+        
+        # If valid, update self.status and persist with .save()
+        self.status = new_status
+        self.save(update_fields=["status"])
+        return self
         
 
 class BankTransactionInvoice(models.Model): # Bridge table for applying bank transactions to invoices (AR settlements)

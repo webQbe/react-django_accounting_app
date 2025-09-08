@@ -124,6 +124,25 @@ def mark_as_paid(modeladmin, request, queryset):
         except ValidationError as e:
             modeladmin.message_user(request, f"{inv}: {e}", level=messages.ERROR)
 
+""" Add button/action that call bank transaction.transition_to("partially_applied") """
+@admin.action(description="Mark selected bank transactions as Partially applied")
+def mark_as_partially_applied(modeladmin, request, queryset):
+    for bt in queryset:
+        try:
+            bt.transition_to("partially_applied")
+            # enforces the rules coded in transition_to() instead of letting admins bypass them
+        except ValidationError as e:
+            modeladmin.message_user(request, f"{bt}: {e}", level=messages.ERROR)
+
+""" call bank transaction.transition_to("fully_applied") """
+@admin.action(description="Mark selected bank transactions as Fully applied")
+def mark_as_fully_applied(modeladmin, request, queryset):
+    for bt in queryset:
+        try:
+            bt.transition_to("fully_applied")
+        except ValidationError as e:
+            modeladmin.message_user(request, f"{bt}: {e}", level=messages.ERROR)
+
 # ---------- ModelAdmin registrations ----------
 
 # Register `Company` model in admin with this custom config
@@ -365,8 +384,9 @@ class BankAccountAdmin(admin.ModelAdmin):
 # Register `BankTransaction` model
 @admin.register(models.BankTransaction)
 class BankTransactionAdmin(admin.ModelAdmin):
-    list_display = ("id", "company", "bank_account", "payment_date", "amount", "payment_method", "reference")
-    list_filter = ("company", "bank_account", "payment_method", "payment_date")
+    list_display = ("id", "company", "bank_account", "payment_date", "amount", "payment_method", "reference", "status")
+    list_filter = ("company", "bank_account", "payment_method", "payment_date", "status")
+    actions = [mark_as_partially_applied, mark_as_fully_applied]
     inlines = [BankTransactionInvoiceInline, BankTransactionBillInline]
 
     # Fetch everything in one SQL join
