@@ -272,7 +272,8 @@ class Customer(models.Model): # Represents client who receives invoices (AR side
 
                             # Make reverse lookups possible
                             # i.e., which customers use this AR account as default
-                            related_name="customers_default_ar"
+                            related_name="customers_default_ar",
+                            help_text="Default AR account used for this customer"
                         )
 
     # Enforce tenant scoping
@@ -288,6 +289,18 @@ class Customer(models.Model): # Represents client who receives invoices (AR side
     # Display customer name in admin/UI
     def __str__(self):
         return self.name
+
+    """ Ensure AR account belongs to the same company """
+    def clean(self):
+        if self.default_ar_account and self.default_ar_account.company_id != self.company_id:
+            raise ValidationError(
+                "Default AR account must belong to the same company as the customer."
+            )
+        return super().clean()
+
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
 
 
 class Vendor(models.Model):  # Mirrors Customer but for Accounts Payable (AP)
