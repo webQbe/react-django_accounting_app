@@ -991,6 +991,13 @@ class BankAccount(models.Model): # Represents bank account company maintains
         # Indexed for fast lookup
         indexes = [models.Index(fields=["company", "name"])]
 
+    def __str__(self):
+        # In your BankTransaction form (admin)
+        # Show name + masked number for clarity
+        if self.account_number_masked:
+            return f"{self.name} ({self.account_number_masked})"
+        return self.name
+
 
 class BankTransaction(models.Model): # Represents single inflow/outflow in a bank account
     # Belongs to both a Company and a specific BankAccount
@@ -1031,6 +1038,10 @@ class BankTransaction(models.Model): # Represents single inflow/outflow in a ban
             # Prevent over-allocation: you can’t apply more than actual bank transaction’s amount
             if applied > self.amount:
                 raise ValidationError("Applied payments exceed bank transaction amount")
+            
+    # Show something human-readable in Django Admin
+    def __str__(self):
+        return f"{self.bank_account.name} - {self.payment_date} - {self.amount} {self.currency_code}"
         
 
 class BankTransactionInvoice(models.Model): # Bridge table for applying bank transactions to invoices (AR settlements)
