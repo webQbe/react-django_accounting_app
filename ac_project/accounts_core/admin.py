@@ -9,6 +9,8 @@ from django import forms # Extended `AbstractUser` with extra fields needs custo
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import UserCreationForm as DjangoUserCreationForm, UserChangeForm as DjangoUserChangeForm
 from django.db.models import Prefetch
+from django.core.exceptions import ValidationError 
+
 
 # ---------- Helpful inline admin classes ----------
 
@@ -102,6 +104,25 @@ def post_journal_entries(modeladmin, # `ModelAdmin` class for JournalEntry
 # Translatable text to show up in admin “Actions” dropdown
 post_journal_entries.short_description = _("Post selected journal entries (make immutable)")
 
+
+""" Add button/action that call invoice.transition_to("open") """
+@admin.action(description="Mark selected invoices as Open")
+def mark_as_open(modeladmin, request, queryset):
+    for inv in queryset:
+        try:
+            inv.transition_to("open")
+            # enforces the rules coded in transition_to() instead of letting admins bypass them
+        except ValidationError as e:
+            modeladmin.message_user(request, f"{inv}: {e}", level=messages.ERROR)
+
+""" call invoice.transition_to("paid") """
+@admin.action(description="Mark selected invoices as Paid")
+def mark_as_paid(modeladmin, request, queryset):
+    for inv in queryset:
+        try:
+            inv.transition_to("paid")
+        except ValidationError as e:
+            modeladmin.message_user(request, f"{inv}: {e}", level=messages.ERROR)
 
 # ---------- ModelAdmin registrations ----------
 
@@ -270,6 +291,7 @@ class JournalLineAdmin(admin.ModelAdmin):
 class InvoiceAdmin(admin.ModelAdmin):
     list_display = ("id", "company", "invoice_number", "customer", "date", "due_date", "status", "total", "outstanding_amount")
     list_filter = ("company", "status", "date")
+    actions = [mark_as_open, mark_as_paid]
     search_fields = ("invoice_number", "customer__name")
     inlines = [InvoiceLineInline]
 
