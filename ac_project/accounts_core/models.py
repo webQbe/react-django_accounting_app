@@ -1020,17 +1020,17 @@ class BankTransaction(models.Model): # Represents single inflow/outflow in a ban
         if self.currency_code != self.bank_account.currency_code:
             raise ValidationError("Transaction currency must match bank account currency")
         
-        # Applied amount check - ensure sum of applied <= amount
-        # Find all join rows 
-        # where this bank transaction was applied against invoices
-        applied = BankTransactionInvoice.objects.filter(bank_transaction=self).aggregate(
-            total=models.Sum("applied_amount")
-        )["total"] or Decimal('0')
+        # Only check related rows if this transaction already saved/exists in DB
+        if self.pk:
+            # Applied amount check - ensure sum of applied <= amount
+            # Find all join rows where this bank transaction was applied against invoices
+            applied = BankTransactionInvoice.objects.filter(bank_transaction=self).aggregate(
+                total=models.Sum("applied_amount")
+            )["total"] or Decimal('0')
 
-        # Prevent over-allocation: 
-        # you can’t apply more than actual bank transaction’s amount
-        if applied > self.amount:
-            raise ValidationError("Applied payments exceed bank transaction amount")
+            # Prevent over-allocation: you can’t apply more than actual bank transaction’s amount
+            if applied > self.amount:
+                raise ValidationError("Applied payments exceed bank transaction amount")
         
 
 class BankTransactionInvoice(models.Model): # Bridge table for applying bank transactions to invoices (AR settlements)
