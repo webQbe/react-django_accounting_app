@@ -1,12 +1,12 @@
 
-from django.db.models.signals import pre_delete 
+from django.db.models.signals import pre_delete, post_save, post_delete
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError 
 
 from .models import (
     BankTransactionInvoice, Invoice, 
     BankTransactionBill, Bill, Account,
-    JournalEntry, JournalLine, Period
+    JournalEntry, JournalLine, Period, InvoiceLine
 )
 
 """ Block invoice deletion if any payments are applied."""
@@ -20,6 +20,22 @@ def prevent_delete_invoice_with_payments(sender, instance, **kwargs):
         # prevent delete
         raise ValidationError("Cannot delete invoice with applied payments.")
     
+"""
+    Recalculate invoice totals when a line is added/updated/removed.
+    Use update via model methods to keep validation/consistency.
+"""
+@receiver((post_save, post_delete), sender=InvoiceLine)
+def invoice_line_changed(sender, instance, **kwargs):
+    try:
+        inv = Invoice.objects.get(pk=instance.invoice_id)
+    except Invoice.DoesNotExist:
+        return
+    # recompute and save only the changed fields to reduce churn
+    inv.recalc_totals()
+    # save totals, no need to revalidate lines here
+    inv.save(update_fields=["total", "outstanding_amount"])
+    
+
 """Block bill deletion if any payments are applied."""
 @receiver(pre_delete, sender=Bill) 
 def prevent_delete_bill_with_payments(sender, instance, **kwargs):

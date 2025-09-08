@@ -8,6 +8,7 @@ from . import models
 from django import forms # Extended `AbstractUser` with extra fields needs custom admin forms
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import UserCreationForm as DjangoUserCreationForm, UserChangeForm as DjangoUserChangeForm
+from django.db.models import Prefetch
 
 # ---------- Helpful inline admin classes ----------
 
@@ -27,10 +28,23 @@ class JournalLineInline(admin.TabularInline): # admin.TabularInline: shows relat
             return list(self.readonly_fields) + ["account", "description", "debit_amount", "credit_amount", "invoice", "bill", "bank_transaction", "fixed_asset"]
         return self.readonly_fields
 
+class InvoiceLineForm(forms.ModelForm):
+    class Meta:
+        model = models.InvoiceLine
+        exclude = ("company",) # hide company from inline form
+      
+    def clean(self):
+        # set company_id if possible (form.instance.invoice may have pk after admin saves parent)
+        if getattr(self.instance, "invoice_id", None) and not getattr(self.instance, "company_id", None):
+            self.instance.company_id = models.Invoice.objects.only("company_id").get(pk=self.instance.invoice_id).company_id
+        return super().clean()
+
 
 class InvoiceLineInline(admin.TabularInline):
     """ Shows invoice lines under an Invoice page """
     model = models.InvoiceLine
+    form = InvoiceLineForm
+    exclude = ("company",) #  users don’t need to set `company` manually
     extra = 0
     fields = ("item", "description", "quantity", "unit_price", "line_total", "account")
     readonly_fields = ("line_total",) # `line_total` is computed automatically, so it’s read-only
@@ -259,15 +273,25 @@ class InvoiceAdmin(admin.ModelAdmin):
     search_fields = ("invoice_number", "customer__name")
     inlines = [InvoiceLineInline]
 
-    # Fetch everything in one SQL join
+    """ 
+        For each Invoice, prefetch all its InvoiceLines, and 
+        within those lines also prefetch their linked Item & Account objects.
+    """
     def get_queryset(self, request):
-        qs = super().get_queryset(request)
+        # queryset of invoices admin page will display - Invoice.objects.all()
+        qs = super().get_queryset(request) 
+        # Fetch invoice lines, also fetch their related Item & Account
+        invoice_lines_qs = models.InvoiceLine.objects.select_related("item", "account")
+        # Use a SQL join so it fetches company & customer in the same query as Invoice
         return qs.select_related("company", "customer").prefetch_related(
-            "invoiceline_set__item", 
-            "invoiceline_set__account"
-        )
-        """ For each Invoice, prefetch all its InvoiceLines, and 
-            within those lines also prefetch their linked Item & Account objects."""
+            # Prefetch invoice lines
+            # so we can loop over invoice.prefetched_lines without extra queries
+            Prefetch("lines", # reverse relation from Invoice → InvoiceLine (because of related_name="lines")
+                     queryset=invoice_lines_qs, 
+                     # store prefetched results into invoice.prefetched_lines
+                     to_attr="prefetched_lines" 
+                    )
+            )
 
 # Register `InvoiceLine` model
 @admin.register(models.InvoiceLine)

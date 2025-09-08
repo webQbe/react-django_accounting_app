@@ -670,6 +670,14 @@ class Invoice(models.Model): # Represents a customer invoice
 
     """ Ensure invoice's stored totals are always in sync with its lines and payments """
     def recalc_totals(self): # Recompute invoice totals every time
+        
+        # safe to call only when invoice has a pk (or okay to return zeros)
+        # guard if no pk: there are no lines yet
+        if not getattr(self, "pk", None):
+            self.total = Decimal("0.00")
+            self.outstanding_amount = Decimal("0.00")
+            return
+        
         # Defined invoice FK with related_name="lines" on InvoiceLine model
         lines = self.lines.all() # So, reverse relation `lines` auto-created on Invoice model
         # Calculate sum of all InvoiceLine.line_totals
@@ -685,7 +693,16 @@ class Invoice(models.Model): # Represents a customer invoice
 
     """ Prevent “dirty totals” or “negative receivables” from persisting """
     def save(self, *args, **kwargs):
-        # Recompute before saving
+        """ If this is a new invoice (no pk yet), 
+                persist it first so inlines can reference it safely """
+        is_new = not bool(self.pk)
+        if is_new:
+            # Save parent first to get a PK. 
+            super().save(*args, **kwargs)
+            return
+
+        """ Existing invoice 
+                Recompute before saving """
         self.recalc_totals()
         # ensure outstanding_amount non-negative
         if self.outstanding_amount < 0:
@@ -724,7 +741,7 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
     
     # Line belongs to both company and parent invoice
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
-    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE)
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="lines")
 
     # Optionally linked to a predefined Item
     # Or just free-text description if it’s a custom line
@@ -769,27 +786,35 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
 
     """ Ensure individual line amounts are valid """
     def clean(self):
-        if self.quantity < 0: # Quantity must be non-negative
+        if self.quantity is not None and self.quantity < 0: # Quantity must be non-negative
             raise ValidationError("Quantity must be >= 0")
-        if self.unit_price < 0: # Unit price must be non-negative
+        if self.unit_price is not None and self.unit_price < 0: # Unit price must be non-negative
             raise ValidationError("Unit price must be >= 0")
         
-        # line_total must equal quantity * unit_price
+        # compute expected total 
         expected = (self.quantity or Decimal('0')) * (self.unit_price or Decimal('0'))
         if self.line_total != expected: # If it doesn’t, it recalculates (self-healing)
             self.line_total = expected 
 
-        # Tenant safety check
-        if self.invoice and self.company != self.invoice.company:
-            # every line must belong to the same company as its invoice
-            raise ValidationError("InvoiceLine.company must match Invoice.company")
+        # Tenant safety: 
+        # Never dereference self.invoice directly unless invoice_id exists
+        if getattr(self, "invoice_id", None) and getattr(self, "company_id", None):
+            """ safely obtain parent company_id from DB  """
+            inv_company_id = Invoice.objects.only("company_id").get(pk=self.invoice_id).company_id
+            # Only raise a tenant-mismatch error if both sides are known
+            if self.company_id != self.invoice.company_id:
+                raise ValidationError("InvoiceLine.company must match Invoice.company")
 
     """ Ensure no inconsistent invoice line can ever be persisted """
     def save(self, *args, **kwargs):
-        # Force line_total to be recomputed before save, regardless of input
-        self.line_total = (self.quantity or 0) * (self.unit_price or 0)
-        self.full_clean() # Run all validations in clean() again
-        return super().save(*args, **kwargs) # Then finally save
+        # copy company_id from DB if invoice_id is present
+        if not getattr(self, "company_id", None) and getattr(self, "invoice_id", None):
+            self.company_id = Invoice.objects.only("company_id").get(pk=self.invoice_id).company_id
+        # compute line_total always
+        self.line_total = (self.quantity or Decimal('0')) * (self.unit_price or Decimal('0')) 
+        # Run validation, this will call clean()
+        self.full_clean() 
+        return super().save(*args, **kwargs)
 
 
 # ---------- Bills / BillLines ----------
