@@ -646,6 +646,10 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
             ),
         ]
 
+    # Show journal, account, and amounts in admin dropdowns and debug logs 
+    def __str__(self):
+        return f"{self.journal_id} | {self.account.code} {self.account.name} | D:{self.debit_amount or 0} C:{self.credit_amount or 0}"
+   
     # Business logic validation: 
     # - Debit/credit should always be non-negative
     # - Prevent mixing payable and receivable logic on one line
@@ -969,6 +973,10 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
                                 )
         ]
 
+    def __str__(self):
+        # If no bill number, fall back to database ID
+        return f"Bill: {self.bill_number or self.pk}"
+
     """ Ensure bill's stored totals are always in sync with its lines and payments """
     def recalc_totals(self): # Recompute bill totals every time
         # Defined bill FK with related_name="lines" on BillLine model
@@ -1251,6 +1259,10 @@ class BankTransactionInvoice(models.Model): # Bridge table for applying bank tra
                                     name="bt_inv_non_negative_amounts",
                                 ),
             ]
+
+    # Show bank_transaction, invoice_number, and applied_amount in admin dropdowns and debug logs 
+    def __str__(self):
+        return f"BT: {self.bank_transaction} → Inv: {self.invoice.invoice_number} Amt: ({self.applied_amount})"
         
     def clean(self):
         # You can’t apply negative payment
@@ -1305,6 +1317,10 @@ class BankTransactionBill(models.Model): # Bridge table for applying bank transa
                                 ),
         ]
 
+    # Show bank_transaction, bill_number, and applied_amount in admin dropdowns and debug logs 
+    def __str__(self):
+        return f"BT: {self.bank_transaction} → Bill: {self.bill.bill_number} Amt: ({self.applied_amount})"
+    
     def clean(self):
         # You can’t apply negative payment
         if self.applied_amount < 0: 
@@ -1458,6 +1474,11 @@ class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot us
                                 )
         ]
 
+    # Show company.slug, snapshot_date, account.code, account.name, and
+    # debit/credit balances in admin dropdowns and debug logs 
+    def __str__(self):
+        return f"{self.company.slug} {self.snapshot_date} | {self.account.code} {self.account.name}: D {self.debit_balance} / C {self.credit_balance}"
+
     def clean(self):
         # Tenancy check
         # Ensure account chosen belongs to the same company
@@ -1493,6 +1514,11 @@ class AuditLog(models.Model): # Gives accountability and traceability across who
 
     # Enforce tenant scoping
     objects = TenantManager() 
+
+    # Show created_at, user, action, object_type, and
+    # object_id in admin dropdowns and debug logs 
+    def __str__(self):
+        return f"[{self.created_at:%Y-%m-%d %H:%M}] {self.user} {self.action} {self.object_type}({self.object_id})"
 
     def clean(self):
         # Ensure the user is a member of the company being logged
