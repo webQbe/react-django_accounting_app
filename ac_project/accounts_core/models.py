@@ -406,6 +406,13 @@ class Item(models.Model): # Represents something a company sells & purchases
 
     def __str__(self):
         return self.name
+    
+    """ Can’t create an Item for Company A but point it to an Account from Company B """
+    def clean(self):
+        if self.sales_account and self.sales_account.company_id != self.company_id:
+            raise ValidationError("Sales account must belong to the same company as the item.")
+        if self.purchase_account and self.purchase_account.company_id != self.company_id:
+            raise ValidationError("Purchase account must belong to the same company as the item.")
 
 
 # ---------- Journal (Header) & JournalLine ----------
