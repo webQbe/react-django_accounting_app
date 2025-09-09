@@ -174,6 +174,10 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
         if self.category and self.category.company != self.company:
             raise ValidationError("AccountCategory must belong to the same company as Account.")
 
+        # Check if parent account belongs to same company
+        if self.parent and self.parent.company != self.company:
+            raise ValidationError("Parent account must belong to the same company as child account.")
+
     def save(self, *args, **kwargs):
         """ Enforce business immutability (can’t disable accounts used in journal lines) """
         # Prevent disabling if used in journals
@@ -239,6 +243,10 @@ class Period(models.Model): # Each Period represents a time bucket during which 
     def clean(self):
         if self.start_date >= self.end_date:
             raise ValidationError("start_date must be before end_date")
+        
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
 
 
 # ---------- Customers & Vendors ----------
@@ -426,6 +434,9 @@ class Item(models.Model): # Represents something a company sells & purchases
         if self.purchase_account and self.purchase_account.company_id != self.company_id:
             raise ValidationError("Purchase account must belong to the same company as the item.")
 
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
 
 # ---------- Journal (Header) & JournalLine ----------
 class JournalEntry(models.Model): # Represents one accounting transaction 
@@ -511,11 +522,19 @@ class JournalEntry(models.Model): # Represents one accounting transaction
             if self.status.posted:
                 raise ValidationError("Journal already posted")
 
-            # Enforces tenant consistency: 
+            # Enforce tenant consistency
             # every line must belong to same company as journal
             if lines.exclude(company=self.company).exists():
                 raise ValidationError("All journal lines must belong to same company as journal.")
-
+            
+            # Check period
+            if self.period.exclude(company=self.company).exists():
+                raise ValidationError("Period must belong to same company as journal")
+            
+            # Check creator
+            if self.created_by.exclude(company=self.company).exists():
+                raise ValidationError("Creator must belong to same company as journal")
+            
             # Ensure periods open
             if self.period and self.period.is_closed:
                 raise ValidationError("Period is closed")
@@ -529,7 +548,6 @@ class JournalEntry(models.Model): # Represents one accounting transaction
         # Service layer function to trigger snapshot update
         # Recalculates AccountBalanceSnapshot for all accounts affected by this journal
         update_snapshots_for_journal(self) 
-
 
     def clean(self):
         """ Don't modify posted journals """
@@ -657,6 +675,18 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
         # Ensure account chosen belongs to the same company
         if self.account and self.account.company != self.company:
             raise ValidationError("JournalLine.account must belong to the same company.")
+        # Ensure invoice chosen belongs to the same company
+        if self.invoice and self.invoice.company != self.company:
+            raise ValidationError("JournalLine.invoice must belong to the same company.")
+        # Ensure bill chosen belongs to the same company
+        if self.bill and self.bill.company != self.company:
+            raise ValidationError("JournalLine.bill must belong to the same company.")
+        # Ensure bank transaction chosen belongs to the same company
+        if self.bank_transaction and self.bank_transaction.company != self.company:
+            raise ValidationError("JournalLine.bank_transaction must belong to the same company.")
+        # Ensure fixed asset chosen belongs to the same company
+        if self.fixed_asset and self.fixed_asset.company != self.company:
+            raise ValidationError("JournalLine.fixed_asset must belong to the same company.")
 
         # Check if an Invoice/Bill/Asset references a non-control account → block it
         if self.invoice and not self.account.is_control_account:
@@ -757,6 +787,9 @@ class Invoice(models.Model): # Represents a customer invoice
                 persist it first so inlines can reference it safely """
         is_new = not bool(self.pk)
         if is_new:
+            # Ensure customer chosen belongs to the same company
+            if self.customer and self.customer.company != self.company:
+                raise ValidationError("Customer must belong to the same company.")
             # Save parent first to get a PK. 
             super().save(*args, **kwargs)
             return
@@ -869,6 +902,13 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
             # Only raise a tenant-mismatch error if both sides are known
             if self.company_id != self.invoice.company_id:
                 raise ValidationError("InvoiceLine.company must match Invoice.company")
+            # Check for tenant-mismatch in item    
+            if self.company_id != self.item.company_id:
+                raise ValidationError("InvoiceLine.company must match Item.company")
+            # Check for tenant-mismatch in account    
+            if self.company_id != self.account.company_id:
+                raise ValidationError("InvoiceLine.company must match Account.company")
+        
 
     """ Ensure no inconsistent invoice line can ever be persisted """
     def save(self, *args, **kwargs):
@@ -946,6 +986,17 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
 
     """ Prevent “dirty totals” or “negative receivables” from persisting """
     def save(self, *args, **kwargs):
+        """ If this is a new bill (no pk yet), 
+                persist it first so inlines can reference it safely """
+        is_new = not bool(self.pk)
+        if is_new:
+            # Ensure vendor chosen belongs to the same company
+            if self.vendor and self.vendor.company != self.company:
+                raise ValidationError("Vendor must belong to the same company.")
+            # Save parent first to get a PK. 
+            super().save(*args, **kwargs)
+            return
+
         # Recompute before saving
         self.recalc_totals()
         # ensure outstanding non-negative
@@ -1022,12 +1073,25 @@ class BillLine(models.Model): # Detail line represents individual items/services
             self.line_total = expected 
 
         # Tenant safety check
-        if self.bill and self.company != self.bill.company:
-            # every line must belong to the same company as its bill
-            raise ValidationError("BillLine.company must match Bill.company")
+        # Never dereference self.bill directly unless bill_id exists
+        if getattr(self, "bill_id", None) and getattr(self, "company_id", None):
+            """ safely obtain parent company_id from DB  """
+            bill_company_id = Bill.objects.only("company_id").get(pk=self.bill_id).company_id
+            # Only raise a tenant-mismatch error if both sides are known
+            if self.company_id != self.bill.company_id:
+                raise ValidationError("BillLine.company must match Bill.company")
+            # Check for tenant-mismatch in item    
+            if self.company_id != self.item.company_id:
+                raise ValidationError("BillLine.company must match Item.company")
+            # Check for tenant-mismatch in account    
+            if self.company_id != self.account.company_id:
+                raise ValidationError("BillLine.company must match Account.company")
 
     """ Ensure no inconsistent bill line can ever be persisted """
     def save(self, *args, **kwargs):
+        # copy company_id from DB if bill_id is present
+        if not getattr(self, "company_id", None) and getattr(self, "bill_id", None):
+            self.company_id = Bill.objects.only("company_id").get(pk=self.bill_id).company_id
         # Force line_total to be recomputed before save, regardless of input
         self.line_total = (self.quantity or 0) * (self.unit_price or 0)
         self.full_clean() # Run all validations in clean() again
@@ -1088,6 +1152,11 @@ class BankTransaction(models.Model): # Represents single inflow/outflow in a ban
                 ]
 
     def clean(self): # auto-runs when you call full_clean() before saving
+        # Tenancy check
+        # Ensure bank account chosen belongs to the same company
+        if self.bank_account and self.bank_account.company != self.company:
+            raise ValidationError("Bank account must belong to the same company.")
+        
         # Currency check
         # Prevent mixing currencies in the same account ledger
         if self.currency_code != self.bank_account.currency_code:
@@ -1105,6 +1174,10 @@ class BankTransaction(models.Model): # Represents single inflow/outflow in a ban
             if applied > self.amount:
                 raise ValidationError("Applied payments exceed bank transaction amount")
             
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
+    
     # Show something human-readable in Django Admin
     def __str__(self):
         return f"{self.bank_account.name} - {self.payment_date} - {self.amount} {self.currency_code} ({self.status})"
@@ -1190,11 +1263,22 @@ class BankTransactionInvoice(models.Model): # Bridge table for applying bank tra
             raise ValidationError("Applied amount cannot exceed invoice outstanding")
         
         # Prevent cross-company contamination
+        # Ensure Bank transaction chosen belongs to the same company
+        if self.bank_transaction and self.bank_transaction.company != self.company:
+            raise ValidationError("Bank transaction must belong to the same company.")
+        
+        # Ensure invoice chosen belongs to the same company
+        if self.invoice and self.invoice.company != self.company:
+            raise ValidationError("Invoice must belong to the same company.")
+        
         """ You can't accidentally link a BankTransaction 
             from Company A to an Invoice from Company B. """
         if self.invoice.company != self.bank_transaction.company:
             raise ValidationError("Invoice and BankTransaction must belong to same company")
 
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
  
 class BankTransactionBill(models.Model): # Bridge table for applying bank transactions to bills (AP settlements)
     # Same idea as invoices, but for vendor payments
@@ -1232,11 +1316,21 @@ class BankTransactionBill(models.Model): # Bridge table for applying bank transa
             raise ValidationError("Applied amount cannot exceed bill outstanding")
         
         # Prevent cross-company contamination
+        # Ensure Bank transaction chosen belongs to the same company
+        if self.bank_transaction and self.bank_transaction.company != self.company:
+            raise ValidationError("Bank transaction must belong to the same company.")
+        # Ensure bill chosen belongs to the same company
+        if self.bill and self.bill.company != self.company:
+            raise ValidationError("Bill must belong to the same company.")
+
         """ You can't accidentally link a BankTransaction 
             from Company A to an Bill from Company B. """
         if self.bill.company != self.bank_transaction.company:
             raise ValidationError("Bill and BankTransaction must belong to same company")
 
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
 
 # ---------- Fixed Assets ----------
 class FixedAsset(models.Model): # tracks long-term assets and handle depreciation over time
@@ -1302,6 +1396,14 @@ class FixedAsset(models.Model): # tracks long-term assets and handle depreciatio
         return self.description
     
     def clean(self):
+        # Tenancy checks
+        # Ensure account chosen belongs to the same company
+        if self.account and self.account.company != self.company:
+            raise ValidationError("Account must belong to the same company.")
+        # Ensure vendor chosen belongs to the same company
+        if self.vendor and self.vendor.company != self.company:
+            raise ValidationError("Vendor must belong to the same company.")
+
         # Prevent assets from being marked as depreciable when their lifespan hasn’t been set
         # Without a positive number of years, depreciation makes no sense
         if self.depreciation_method and (not self.useful_life_years or self.useful_life_years <= 0):
@@ -1310,6 +1412,10 @@ class FixedAsset(models.Model): # tracks long-term assets and handle depreciatio
         # Purchase cost cannot be negative
         if self.purchase_cost < 0:
             raise ValidationError("Purchase cost must be >= 0")
+        
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
 
 # ---------- Account Balance Snapshot (optional materialized) ----------
 class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot used for reporting performance
@@ -1352,6 +1458,16 @@ class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot us
                                 )
         ]
 
+    def clean(self):
+        # Tenancy check
+        # Ensure account chosen belongs to the same company
+        if self.account and self.account.company != self.company:
+            raise ValidationError("Account must belong to the same company.")
+        
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
+    
 # ---------- Audit / Event log ----------
 class AuditLog(models.Model): # Gives accountability and traceability across whole system
     # Associate log entry with a tenant (multi-company setup)
@@ -1377,6 +1493,16 @@ class AuditLog(models.Model): # Gives accountability and traceability across who
 
     # Enforce tenant scoping
     objects = TenantManager() 
+
+    def clean(self):
+        # Ensure the user is a member of the company being logged
+        if self.user and self.company:
+            if not self.user.memberships.filter(company=self.company, is_active=True).exists():
+                raise ValidationError("AuditLog.user must be a member of AuditLog.company")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
 
 # ---------- Currency ----------
 class Currency(models.Model): # Store a list of valid currencies
@@ -1504,3 +1630,7 @@ class EntityMembership(models.Model): # Bridge table (or a "join model") between
                 raise ValidationError(
                     f"Default company {self.user.default_company} must be one of user's memberships."
                 )
+            
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
