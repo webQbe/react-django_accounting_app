@@ -1139,7 +1139,8 @@ class BankAccount(models.Model): # Represents bank account company maintains
 class BankTransaction(models.Model): # Represents single inflow/outflow in a bank account
     # Belongs to both a Company and a specific BankAccount
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
-    bank_account = models.ForeignKey(BankAccount, on_delete=models.CASCADE)
+    # BankAccount → on_delete=PROTECT → prevents BankAccount deletion if transactions exist
+    bank_account = models.ForeignKey(BankAccount, on_delete=models.PROTECT)
     payment_date = models.DateField() # when it cleared
     # amount: positive = inflow (deposit), negative = outflow (payment)
     amount = models.DecimalField(max_digits=18, decimal_places=2)
@@ -1439,7 +1440,8 @@ class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot us
     # Tied to a specific tenant (multi-company setup)
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     # Snapshot is for a specific GL account (like Cash, Accounts Payable, Sales)
-    account = models.ForeignKey(Account, on_delete=models.CASCADE)
+    # on_delete= CASCADE: If you delete an Account, you don’t need orphaned snapshots floating around
+    account = models.ForeignKey(Account, on_delete=models.CASCADE) 
     # The date snapshot is taken (daily, monthly, or at reporting cutoffs (e.g., end of period))
     snapshot_date = models.DateField()
 
