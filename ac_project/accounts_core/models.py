@@ -816,6 +816,11 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
             ),
         ]
 
+    # Show something human-readable in Django Admin
+    def __str__(self):
+        return f"Invoice: {self.invoice.invoice_number} - Item: {self.item} - Total: {self.line_total}"
+
+
     """ Ensure individual line amounts are valid """
     def clean(self):
         if self.quantity is not None and self.quantity < 0: # Quantity must be non-negative
