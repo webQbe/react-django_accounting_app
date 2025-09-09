@@ -143,7 +143,8 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
     
     is_active = models.BooleanField(default=True) # “soft deactivate” accounts (hide in UI, stop new postings) without deleting history
     created_at = models.DateTimeField(auto_now_add=True) # Track when the account was created.
-
+    is_control_account = models.BooleanField(default=False) # marker for accounts that must reconcile with subledgers
+    
     # Enforce tenant scoping
     objects = TenantManager() 
 
@@ -290,12 +291,18 @@ class Customer(models.Model): # Represents client who receives invoices (AR side
     def __str__(self):
         return self.name
 
-    """ Ensure AR account belongs to the same company """
+    
     def clean(self):
+        # Ensure AR account belongs to the same company
         if self.default_ar_account and self.default_ar_account.company_id != self.company_id:
             raise ValidationError(
                 "Default AR account must belong to the same company as the customer."
             )
+        
+        # Only control accounts can be set as default AR (Customer) 
+        if self.default_ar_account and not self.default_ar_account.is_control_account:
+            raise ValidationError("Default AR account must be a control account")
+        
         return super().clean()
 
     def save(self, *args, **kwargs):
@@ -336,12 +343,17 @@ class Vendor(models.Model):  # Mirrors Customer but for Accounts Payable (AP)
     def __str__(self):
         return self.name
 
-    """ Ensure AR account belongs to the same company """
+    
     def clean(self):
+        # Ensure AR account belongs to the same company
         if self.default_ap_account and self.default_ap_account.company_id != self.company_id:
             raise ValidationError(
                 "Default AP account must belong to the same company as the vendor."
             )
+
+        # Only control accounts can be set as default AP (Vendor)
+        if self.default_ap_account and not self.default_ap_account.is_control_account:
+            raise ValidationError("Default AP account must be a control account") 
         return super().clean()
 
     def save(self, *args, **kwargs):
@@ -646,6 +658,15 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
         if self.account and self.account.company != self.company:
             raise ValidationError("JournalLine.account must belong to the same company.")
 
+        # Check if an Invoice/Bill/Asset references a non-control account → block it
+        if self.invoice and not self.account.is_control_account:
+            raise ValidationError("Invoice postings must use a control AR account.")
+        if self.bill and not self.account.is_control_account:
+            raise ValidationError("Bill postings must use a control AP account.")
+        if self.fixed_asset and not self.account.is_control_account:
+            raise ValidationError("Fixed asset postings must use a control account.")
+
+
     # save() override    
     def save(self, *args, **kwargs):
         # clean()+field validation always run whenever you save a JournalLine programmatically
@@ -880,7 +901,7 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
     due_date = models.DateField(null=True, blank=True) # when payment is expected
     
     # Track workflow
-    status = models.CharField(max_length=20, default="draft")  # draft, open, paid, void
+    status = models.CharField(max_length=20, default="draft")  # draft, posted, paid
 
     # Supports multiple currencies
     currency_code = models.CharField(max_length=10, default="USD")
@@ -1229,7 +1250,31 @@ class FixedAsset(models.Model): # tracks long-term assets and handle depreciatio
     purchase_date = models.DateField(null=True, blank=True) 
     # Acquisition cost - stored as Decimal for precision in accounting
     purchase_cost = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
-   
+    # GL account that represents the asset 
+    account = models.ForeignKey( 
+        Account, 
+        on_delete=models.PROTECT,
+        null=True, blank=True, 
+        limit_choices_to={"ac_type": "Asset"},
+        help_text="GL account where this asset is capitalized",
+    )
+    # who sold it to you
+    vendor = models.ForeignKey(
+        Vendor, 
+        null=True, blank=True,
+        on_delete=models.PROTECT,
+        help_text="Vendor from whom this asset was purchased",
+    )
+    # lifecycle state 
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ("draft", "Draft"),
+            ("capitalized", "Capitalized"),
+            ("disposed", "Disposed"),
+        ],
+        default="draft",
+    )
     # Estimated lifespan in years (for depreciation)
     useful_life_years = models.IntegerField(null=True, blank=True) 
     depreciation_method = models.CharField(
