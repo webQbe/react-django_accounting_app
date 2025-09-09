@@ -319,7 +319,8 @@ class Vendor(models.Model):  # Mirrors Customer but for Accounts Payable (AP)
                                 Account, 
                                 null=True, blank=True, 
                                 on_delete=models.SET_NULL,
-                                related_name="vendors_default_ap" # Lets you see which vendors use a given AP account
+                                related_name="vendors_default_ap", # Lets you see which vendors use a given AP account
+                                help_text="Default AP account used for this vendor"
                             )
 
     # Enforce tenant scoping
@@ -334,6 +335,18 @@ class Vendor(models.Model):  # Mirrors Customer but for Accounts Payable (AP)
 
     def __str__(self):
         return self.name
+
+    """ Ensure AR account belongs to the same company """
+    def clean(self):
+        if self.default_ap_account and self.default_ap_account.company_id != self.company_id:
+            raise ValidationError(
+                "Default AP account must belong to the same company as the vendor."
+            )
+        return super().clean()
+
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
+        return super().save(*args, **kwargs)
 
 # ---------- Items (optional product/service) ----------
 class Item(models.Model): # Represents something a company sells & purchases
