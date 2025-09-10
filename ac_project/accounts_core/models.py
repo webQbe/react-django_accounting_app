@@ -228,6 +228,13 @@ class Period(models.Model): # Each Period represents a time bucket during which 
     objects = TenantManager() 
 
     class Meta:
+
+        # for filtering open periods
+        indexes = [ 
+                    models.Index(fields=["company", "start_date"]),
+                    models.Index(fields=["company", "is_closed"]),
+                ]
+
         # Prevent duplicate period names inside the same company
         constraints = [
           models.UniqueConstraint(fields=["company", "name"], 
@@ -289,6 +296,12 @@ class Customer(models.Model): # Represents client who receives invoices (AR side
     objects = TenantManager() 
 
     class Meta:
+
+        indexes = [ 
+                    models.Index(fields=["company", "name"]),
+                    models.Index(fields=["company", "default_ar_account"]),
+                ]
+
         # Enforce uniqueness per tenant
         constraints = [
           models.UniqueConstraint(fields=["company", "name"], 
@@ -342,6 +355,11 @@ class Vendor(models.Model):  # Mirrors Customer but for Accounts Payable (AP)
     objects = TenantManager() 
 
     class Meta:
+        indexes = [ 
+                    models.Index(fields=["company", "name"]),
+                    models.Index(fields=["company", "default_ap_account"]),
+                ]
+
         # Vendor names must be unique per company
         constraints = [
           models.UniqueConstraint(fields=["company", "name"], 
@@ -1064,7 +1082,10 @@ class BillLine(models.Model): # Detail line represents individual items/services
 
     class Meta:
         # For fast lookups of all lines on a given bill
-        indexes = [models.Index(fields=["company", "bill"])]
+        indexes = [
+                    models.Index(fields=["company", "bill"]),
+                    models.Index(fields=["company", "account"])
+                ]
 
         # Ensure quantity & unit_price are never negative
         constraints = [
@@ -1546,6 +1567,13 @@ class AuditLog(models.Model): # Gives accountability and traceability across who
     # Enforce tenant scoping
     objects = TenantManager() 
 
+    class Meta:
+        # Filter logs quickly
+        indexes = [
+                    models.Index(fields=["company", "user"]),
+                    models.Index(fields=["company", "created_at"]),
+                ]
+
     # Show created_at, user, action, object_type, and
     # object_id in admin dropdowns and debug logs 
     def __str__(self):
@@ -1611,6 +1639,10 @@ class User(AbstractUser): # Replace built-in user with custom user to add add ex
         User.objects.create_user → makes a normal user.
         User.objects.create_superuser → makes a superuser (used by python manage.py createsuperuser)
     """
+
+    class Meta:
+        # helpful in multi-tenant setups
+        indexes = [models.Index(fields=["default_company"])]
 
     # Controls how user is displayed
     def __str__(self):
