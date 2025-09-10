@@ -472,6 +472,14 @@ class JournalEntry(models.Model): # Represents one accounting transaction
         # Speed up listing & filtering (e.g. show all posted entries this month)
         indexes = [models.Index(fields=["company", "date"]), models.Index(fields=["company", "status"])]
 
+        constraints = [
+            # Within one company, each journal entry must be unique
+            # Across companies, duplicates are allowed
+            models.UniqueConstraint(
+                                    fields=["company", "reference"], 
+                                    name="uq_je_company_ref"
+                                )
+        ]     
     def __str__(self):
         return f"JE {self.pk} {self.date} [{self.status}]"
 
@@ -1160,6 +1168,15 @@ class BankTransaction(models.Model): # Represents single inflow/outflow in a ban
                     models.Index(fields=["company", "payment_date"])
                 ]
 
+        constraints = [
+            # Within one company, each bank transaction must be unique
+            # Across companies, duplicates are allowed
+            models.UniqueConstraint(
+                                    fields=["company", "reference"], 
+                                    name="uq_bt_company_ref"
+                                )
+        ]    
+
     def clean(self): # auto-runs when you call full_clean() before saving
         # Tenancy check
         # Ensure bank account chosen belongs to the same company
@@ -1305,6 +1322,9 @@ class BankTransactionBill(models.Model): # Bridge table for applying bank transa
     objects = TenantManager() 
 
     class Meta:
+        indexes = [models.Index(fields=["company", "bank_transaction"]), 
+                   models.Index(fields=["company", "bill"])]
+        
         constraints = [
             # Prevent duplicate application of the same bank transaction to the same bill
             models.UniqueConstraint(
@@ -1407,6 +1427,15 @@ class FixedAsset(models.Model): # tracks long-term assets and handle depreciatio
         # Index makes lookup faster by company, asset_code
         # (since assets are often tracked by code)
         indexes = [models.Index(fields=["company", "asset_code"])]
+
+        constraints = [
+            # Within one company, each fixed asset must be unique
+            # Across companies, duplicates are allowed
+            models.UniqueConstraint(
+                                    fields=["company", "asset_code"], 
+                                    name="uq_fa_company_asset_code"
+                                )
+        ] 
 
     def __str__(self):
         # Return description when you print an asset in Django shell/admin
