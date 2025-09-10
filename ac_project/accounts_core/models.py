@@ -45,6 +45,11 @@ BT_STATUS_CHOICES = [
         ("fully_applied", "Fully applied"),
     ]
 
+INV_STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('open', 'Open'),
+        ('paid', 'Paid'),
+    ]
 # ---------- Tenant / Company ----------
 class Company(models.Model):
     """Tenant / Organization""" 
@@ -783,7 +788,7 @@ class Invoice(models.Model): # Represents a customer invoice
     date = models.DateField() # issue date
     due_date = models.DateField(null=True, blank=True) # payment deadline (can be auto-calculated from customer’s payment terms)
    
-    status = models.CharField(max_length=20, default="draft")  # draft, open, paid, void
+    status = models.CharField(max_length=10, choices=INV_STATUS_CHOICES, default="draft")  # draft, open, paid, void
     """ Workflow:
         draft = not yet finalized.
         open = issued but not paid.
@@ -841,6 +846,21 @@ class Invoice(models.Model): # Represents a customer invoice
         # if payments overshoot for any reason, it caps at 0, not negative
         self.outstanding_amount = max(total - paid, Decimal('0.00'))
 
+    def clean(self):
+        """ Make paid invoices immutable in all code paths (admin, DRF API, custom services) """
+        # If object already exists and is paid, prevent edits
+        if self.pk and self.status == 'paid':
+            orig = Invoice.objects.get(pk=self.pk)
+            changed_fields = []
+            for field in ['invoice_number', 'total', 'company']:
+                # Check for edits
+                if getattr(orig, field) != getattr(self, field):
+                    changed_fields.append(field)
+            if changed_fields:
+                raise ValidationError(
+                    f"Cannot modify {changed_fields} on a paid invoice."
+                )
+
     """ Prevent “dirty totals” or “negative receivables” from persisting """
     def save(self, *args, **kwargs):
         """ If this is a new invoice (no pk yet), 
@@ -862,6 +882,7 @@ class Invoice(models.Model): # Represents a customer invoice
             # important, otherwise credits/payments could accidentally 
             # overpay an invoice and mess up reporting
             raise ValidationError("Outstanding amount cannot be negative")
+        self.full_clean()  # will trigger clean()
         # Then saves normally
         super().save(*args, **kwargs)
 
