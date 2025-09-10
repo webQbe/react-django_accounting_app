@@ -381,6 +381,22 @@ class BillAdmin(admin.ModelAdmin):
         )
         """ For each Bill, prefetch all its BillLines, and 
             within those lines also prefetch their linked Item & Account objects."""
+        
+    """ Enforce immutability at admin level """
+    def get_readonly_fields(self, request, obj=None):
+        # If there is an bill with "paid" status
+        if obj and obj.status == 'paid':
+            # Build a list of all field names
+            # Returning that list means every field becomes read-only
+            return [f.name for f in self.model._meta.fields]
+        # If bill is not paid, fallback to normal behavior
+        return super().get_readonly_fields(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        # If there is an bill with "paid" status
+        if obj and obj.status == 'paid':
+            return False # removes “Delete” option from admin for that bill
+        return super().has_delete_permission(request, obj)
 
 # Register `BillLine` model
 @admin.register(models.BillLine)

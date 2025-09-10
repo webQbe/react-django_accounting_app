@@ -50,6 +50,12 @@ INV_STATUS_CHOICES = [
         ('open', 'Open'),
         ('paid', 'Paid'),
     ]
+
+BILL_STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('posted', 'Posted'),
+        ('paid', 'Paid'),
+    ]
 # ---------- Tenant / Company ----------
 class Company(models.Model):
     """Tenant / Organization""" 
@@ -1022,7 +1028,7 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
     due_date = models.DateField(null=True, blank=True) # when payment is expected
     
     # Track workflow
-    status = models.CharField(max_length=20, default="draft")  # draft, posted, paid
+    status = models.CharField(max_length=20, choices=BILL_STATUS_CHOICES, default="draft")  # draft, posted, paid
 
     # Supports multiple currencies
     currency_code = models.CharField(max_length=10, default="USD")
@@ -1069,6 +1075,21 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
         # if payments overshoot for any reason, it caps at 0, not negative
         self.outstanding_amount = max(total - paid, Decimal('0.00'))
 
+    def clean(self):
+        """ Make paid bills immutable in all code paths (admin, DRF API, custom services) """
+        # If object already exists and is paid, prevent edits
+        if self.pk and self.status == 'paid':
+            orig = Bill.objects.get(pk=self.pk)
+            changed_fields = []
+            for field in ['bill_number', 'total', 'company']:
+                # Check for edits
+                if getattr(orig, field) != getattr(self, field):
+                    changed_fields.append(field)
+            if changed_fields:
+                raise ValidationError(
+                    f"Cannot modify {changed_fields} on a paid bill."
+                )
+
     """ Prevent “dirty totals” or “negative receivables” from persisting """
     def save(self, *args, **kwargs):
         """ If this is a new bill (no pk yet), 
@@ -1082,6 +1103,7 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
             super().save(*args, **kwargs)
             return
 
+        """ For existing bills """
         # Recompute before saving
         self.recalc_totals()
         # ensure outstanding non-negative
@@ -1089,6 +1111,7 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
             # important, otherwise credits/payments could accidentally 
             # overpay a bill and mess up reporting
             raise ValidationError("Outstanding amount cannot be negative")
+        self.full_clean()  # will trigger clean()
         # Then save normally
         super().save(*args, **kwargs)
 
