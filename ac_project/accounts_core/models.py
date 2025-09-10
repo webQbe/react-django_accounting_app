@@ -25,8 +25,8 @@ NORMAL_BALANCE = [
 
 JOURNAL_STATUS = [
     ("draft", "Draft"),       # still editable
+    ("ready", "Ready"),       # validated but not yet posted
     ("posted", "Posted"),     # finalized
-    ("reversed", "Reversed"), # reversal entry applied
 ]
 
 PAYMENT_METHODS = [
@@ -473,8 +473,12 @@ class JournalEntry(models.Model): # Represents one accounting transaction
     status = models.CharField(
                         max_length=10, 
                         choices=JOURNAL_STATUS, 
-                        default="draft" # Workflow control: "draft" until validated, then "posted".
-                        """ Once posted, becomes immutable. """
+                        default="draft" 
+                        """ JournalEntry workflow:
+                            draft → entry created but not yet validated
+                            ready → validated but not yet posted
+                            posted → locked, immutable
+                        """
                         )
     posted_at = models.DateTimeField(null=True, blank=True)
     # Track user who created it
@@ -616,6 +620,27 @@ class JournalEntry(models.Model): # Represents one accounting transaction
             
         # If validation passes, continue with normal save
         super().save(*args, **kwargs)
+
+    # Control status changes
+    def transition_to(self, new_status, user=None):
+        allowed = {
+            "draft": ["ready", "posted"],
+            "ready": ["posted"],
+            "posted": [],
+        }
+        # if later you add `archived` or `void` states, you just update the dictionary
+
+        # prevent skipping validations
+        if new_status not in allowed.get(self.status, []):
+            raise ValidationError(f"Cannot go from {self.status} to {new_status}")
+
+        if new_status == "posted":
+            # call posting logic (validations, mark lines as is_posted, etc.)
+            self.post(user=user)
+        else:
+            # just update the status
+            self.status = new_status
+            self.save(update_fields=["status"])
 
 class JournalLine(models.Model): # Stores Lines ( credits / debits )
     """

@@ -80,6 +80,7 @@ class BankTransactionBillInline(admin.TabularInline):
 # ---------- Admin actions ----------
 
 # Bulk-post multiple journal entries from Django admin list view
+@admin.action(description="Mark selected journals as Posted")
 def post_journal_entries(modeladmin, # `ModelAdmin` class for JournalEntry
                          request,    #  HTTP request object
                          queryset    #  record what admin selected from list view
@@ -92,7 +93,8 @@ def post_journal_entries(modeladmin, # `ModelAdmin` class for JournalEntry
              # Wrap each posting in a DB transaction
             with transaction.atomic():     # Ensure either all steps succeed or DB rolls back
                 # Call `post()` on `JournalEntry` model
-                je.post(user=request.user) # Pass `request.user`to record who posted it
+                # Pass `request.user`to record who posted it
+                je.transition_to("posted", user=request.user)
             success += 1                   # If no error → increment success counter
         except Exception as exc:  # Catch exception: ValidationError, etc.
             # Show error message in Django admin interface
@@ -102,7 +104,7 @@ def post_journal_entries(modeladmin, # `ModelAdmin` class for JournalEntry
     modeladmin.message_user(request, f"Posted {success} JournalEntry(s).", level=messages.SUCCESS)
 
 # Translatable text to show up in admin “Actions” dropdown
-post_journal_entries.short_description = _("Post selected journal entries (make immutable)")
+# post_journal_entries.short_description = _("Post selected journal entries (make immutable)")
 
 
 """ Add button/action that call invoice.transition_to("open") """

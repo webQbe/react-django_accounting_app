@@ -23,7 +23,8 @@ def post_journal_entry(journal_entry_id, user=None):
     with transaction.atomic():
         # Lock the row to avoid race conditions
         je = JournalEntry.objects.select_for_update().get(pk=journal_entry_id)
-        je.post(user=user) 
+        # call posting logic and update state 
+        je.transition_to("posted", user=user) 
         # user=None just means “this parameter is optional; 
         # if you don’t provide it, we’ll treat it as no user”
     return je
