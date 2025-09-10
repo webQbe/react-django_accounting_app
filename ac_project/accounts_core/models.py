@@ -569,7 +569,12 @@ class JournalEntry(models.Model): # Represents one accounting transaction
             """ Update state """
             self.status.posted = True # Mark journal as posted
             self.posted_at = timezone.now() # Timestamp
-            self.save(update_fields=["status","posted_at"])
+            if user:
+                self.created_by = user
+            self.save(update_fields=["posted", "posted_at", "created_by"])
+
+            # mark all lines as posted (bulk update)
+            lines.update(is_posted=True)
 
         # Service layer function to trigger snapshot update
         # Recalculates AccountBalanceSnapshot for all accounts affected by this journal
