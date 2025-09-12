@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError  # Built-in way to raise vali
 from django.db import models, transaction           # To wrap operations in a DB transaction
 from django.utils import timezone                   # Timezone-aware datetime helper
 from django.contrib.auth.models import AbstractUser
-from .managers import TenantManager  # To enforce tenant scoping   
+from .managers import TenantManager, JournalLineCurrencyManager  # custom managers
 
 # Choice Lists
 AC_TYPES = [
@@ -206,6 +206,27 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
                 raise ValidationError("Cannot disable an account that is used in journal lines.")
         return super().save(*args, **kwargs)
     
+# ---------- Currency ----------
+class Currency(models.Model): # Store a list of valid currencies
+    """
+    ISO currencies. Use currency.code FK in other tables instead of free-text.
+    """
+    # Set code as the primary key, so it uniquely identifies a currency
+    code = models.CharField(max_length=3, primary_key=True)  # 'USD', 'EUR'
+    # Human-readable name of the currency
+    name = models.CharField(max_length=64)  # 'US Dollar'
+    # Nullable display symbol ("$", "€", "¥")
+    symbol = models.CharField(max_length=8, blank=True, null=True)  # '$'
+    # Avoid mistakes like storing 12.345 for JPY (which has no sub-units)
+    decimal_places = models.PositiveSmallIntegerField(default=2)
+
+    def __str__(self):
+        # Define how this model prints in Django admin
+        return f"{self.code} ({self.symbol or ''})"
+
+    class Meta:
+        # Make admin display plural as “currencies” instead of default “currencys”
+        verbose_name_plural = "currencies"
 
 # ---------- Period (accounting period) ----------
 class Period(models.Model): # Each Period represents a time bucket during which financial transactions are grouped
@@ -486,9 +507,9 @@ class JournalEntry(models.Model): # Represents one accounting transaction
                         choices=JOURNAL_STATUS, 
                         default="draft" 
                         """ JournalEntry workflow:
-                            draft → entry created but not yet validated
-                            ready → validated but not yet posted
-                            posted → locked, immutable
+                            ("Draft") # still editable
+                            ("Ready") # validated but not yet posted
+                            ("Posted") # finalized
                         """
                         )
     posted_at = models.DateTimeField(null=True, blank=True)
@@ -665,10 +686,20 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
     # Must point to one Account (can’t delete account if lines exist → PROTECT)
     account = models.ForeignKey(Account, on_delete=models.PROTECT)
 
-    # Description and the debit/credit split
+    # Description 
     description = models.CharField(max_length=400, null=True, blank=True)
-    debit_amount = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
-    credit_amount = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
+
+    # Original currency amounts & the debit/credit split
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
+    debit_original = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    credit_original = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+
+    # Conversion
+    fx_rate = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+
+    # Local (functional currency) amounts
+    debit_local = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    credit_local = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     
     # Link each posting line back to the business object that caused it
     invoice = models.ForeignKey("Invoice", null=True, blank=True, on_delete=models.SET_NULL)
@@ -687,8 +718,9 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
     # audit / immutability marker (populated when journal posted)
     is_posted = models.BooleanField(default=False) # prevents edits later
 
-    # Enforce tenant scoping
-    objects = TenantManager() 
+    # Custom managers
+    objects = TenantManager() # Enforce tenant scoping
+    with_currency = JournalLineCurrencyManager() # autofill right currency
 
     class Meta:
         # For fast queries like “all lines for this account” / “all lines in this JE.”
@@ -703,13 +735,24 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
             Django 3.2+ supports CheckConstraint. """
         constraints = [
             models.CheckConstraint(
-                check=(
-                    # You can’t insert or update a row with a negative debit or credit
-                    models.Q(debit_amount__gte=0) & 
-                    models.Q(credit_amount__gte=0)
-                    # Django reuses Q objects to build SQL conditions for constraints
-                ),
-                name="jl_non_negative_amounts"
+                check=(models.Q(debit_original__gte=0) & models.Q(credit_original__gte=0)), 
+                name="jl_non_negative_original_amounts"
+            ),
+            models.CheckConstraint(
+                check=(models.Q(debit_local__gte=0) & models.Q(credit_local__gte=0)), 
+                name="jl_non_negative_local_amounts"
+            ),
+            models.CheckConstraint(
+                check=~(models.Q(debit_original=0) & models.Q(credit_original=0)),
+                name="debit_xor_credit_nonzero_original"
+            ),
+            models.CheckConstraint(
+                check=~(models.Q(debit_local=0) & models.Q(credit_local=0)),
+                name="debit_xor_credit_nonzero_local"
+            ),
+            models.CheckConstraint(
+                check=models.Q(fx_rate__isnull=True) | models.Q(fx_rate__gt=0),
+                name="fx_rate_null_or_positive"
             ),
         ]
 
@@ -1663,28 +1706,6 @@ class AuditLog(models.Model): # Gives accountability and traceability across who
         self.full_clean()  # run validations before saving
         return super().save(*args, **kwargs)
 
-# ---------- Currency ----------
-class Currency(models.Model): # Store a list of valid currencies
-    """
-    ISO currencies. Use currency.code FK in other tables instead of free-text.
-    """
-    # Set code as the primary key, so it uniquely identifies a currency
-    code = models.CharField(max_length=3, primary_key=True)  # 'USD', 'EUR'
-    # Human-readable name of the currency
-    name = models.CharField(max_length=64)  # 'US Dollar'
-    # Nullable display symbol ("$", "€", "¥")
-    symbol = models.CharField(max_length=8, blank=True, null=True)  # '$'
-    # Avoid mistakes like storing 12.345 for JPY (which has no sub-units)
-    decimal_places = models.PositiveSmallIntegerField(default=2)
-
-    def __str__(self):
-        # Define how this model prints in Django admin
-        return f"{self.code} ({self.symbol or ''})"
-
-    class Meta:
-        # Make admin display plural as “currencies” instead of default “currencys”
-        verbose_name_plural = "currencies"
-
 
 # ---------- Custom User (optional) ---------- 
 class User(AbstractUser): # Replace built-in user with custom user to add add extra fields
@@ -1801,7 +1822,7 @@ class EntityMembership(models.Model): # Bridge table (or a "join model") between
 
 # ------------------------ Materialized Views ----------------------
 
-""" Base aggregation by company/period/account """
+"""  Base aggregation by company/period/account """
 class JournalLineAggPeriod(models.Model):
     # Field types must line up with materialized view’s columns
     company_id = models.IntegerField()
@@ -1811,9 +1832,12 @@ class JournalLineAggPeriod(models.Model):
     account_code = models.CharField(max_length=50)
     account_name = models.CharField(max_length=255)
     account_type = models.CharField(max_length=50)
-    total_debit = models.DecimalField(max_digits=18, decimal_places=2)
-    total_credit = models.DecimalField(max_digits=18, decimal_places=2)
-    net_amount = models.DecimalField(max_digits=18, decimal_places=2)
+    total_debit_original = models.DecimalField(max_digits=18, decimal_places=2)
+    total_credit_original = models.DecimalField(max_digits=18, decimal_places=2)
+    net_amount_original = models.DecimalField(max_digits=18, decimal_places=2)
+    total_debit_local = models.DecimalField(max_digits=18, decimal_places=2)
+    total_credit_local = models.DecimalField(max_digits=18, decimal_places=2)
+    net_amount_local = models.DecimalField(max_digits=18, decimal_places=2)
 
     class Meta:
         managed = False   # Django won’t try to create/drop this
@@ -1824,7 +1848,7 @@ class JournalLineAggPeriod(models.Model):
         constraints = [
           models.UniqueConstraint(fields=["company_id", "period_id", "account_id"], 
                                   name="ux_mv_jl_agg_period_company_period_account"),
-        ]
+        ] 
 
 
 """ Trial balance totals per period """
@@ -1835,9 +1859,12 @@ class TrialBalancePeriod(models.Model):
     account_code = models.CharField(max_length=50)
     account_name = models.CharField(max_length=255)
     account_type = models.CharField(max_length=50)
-    period_debit = models.DecimalField(max_digits=18, decimal_places=2)
-    period_credit = models.DecimalField(max_digits=18, decimal_places=2)
-    period_balance = models.DecimalField(max_digits=18, decimal_places=2)
+    period_debit_original = models.DecimalField(max_digits=18, decimal_places=2)
+    period_credit_original = models.DecimalField(max_digits=18, decimal_places=2)
+    period_balance_original = models.DecimalField(max_digits=18, decimal_places=2)
+    period_debit_local = models.DecimalField(max_digits=18, decimal_places=2)
+    period_credit_local = models.DecimalField(max_digits=18, decimal_places=2)
+    period_balance_local = models.DecimalField(max_digits=18, decimal_places=2)
 
     class Meta:
         managed = False   
@@ -1850,6 +1877,7 @@ class TrialBalancePeriod(models.Model):
         ]
     
 
+
 """ Running Trial Balance (point-in-time) """
 class TrialBalanceRunning(models.Model):
     company_id = models.IntegerField()
@@ -1857,9 +1885,12 @@ class TrialBalanceRunning(models.Model):
     account_code = models.CharField(max_length=50)
     account_name = models.CharField(max_length=255)
     account_type = models.CharField(max_length=50)
-    total_debit_to_date = models.DecimalField(max_digits=18, decimal_places=2)
-    total_credit_to_date = models.DecimalField(max_digits=18, decimal_places=2)
-    balance_to_date = models.DecimalField(max_digits=18, decimal_places=2)
+    total_debit_to_date_original = models.DecimalField(max_digits=18, decimal_places=2)
+    total_credit_to_date_original = models.DecimalField(max_digits=18, decimal_places=2)
+    balance_to_date_original = models.DecimalField(max_digits=18, decimal_places=2)
+    total_debit_to_date_local = models.DecimalField(max_digits=18, decimal_places=2)
+    total_credit_to_date_local = models.DecimalField(max_digits=18, decimal_places=2)
+    balance_to_date_local = models.DecimalField(max_digits=18, decimal_places=2)
 
     class Meta:
         managed = False   
@@ -1869,15 +1900,18 @@ class TrialBalanceRunning(models.Model):
         constraints = [
           models.UniqueConstraint(fields=["company_id", "account_id"], 
                                   name="ux_mv_trial_balance_running_company_account"),
-        ]
-    
+        ]        
+
 """ Profit & Loss (period-based) """
 class ProfitLossPeriod(models.Model):
     company_id = models.IntegerField()
     period_id = models.IntegerField()
-    total_income = models.DecimalField(max_digits=18, decimal_places=2)
-    total_expense = models.DecimalField(max_digits=18, decimal_places=2)
-    net_profit = models.DecimalField(max_digits=18, decimal_places=2)
+    total_income_original = models.DecimalField(max_digits=18, decimal_places=2)
+    total_expense_original = models.DecimalField(max_digits=18, decimal_places=2)
+    net_profit_original = models.DecimalField(max_digits=18, decimal_places=2)
+    total_income_local = models.DecimalField(max_digits=18, decimal_places=2)
+    total_expense_local = models.DecimalField(max_digits=18, decimal_places=2)
+    net_profit_local = models.DecimalField(max_digits=18, decimal_places=2)
 
     class Meta:
         managed = False   
@@ -1889,6 +1923,7 @@ class ProfitLossPeriod(models.Model):
                                   name="ux_mv_pl_period_company_period"),
         ]
 
+        
 """ Balance Sheet (snapshot) """
 class BalanceSheetRunning(models.Model):
     company_id = models.IntegerField()
@@ -1896,7 +1931,8 @@ class BalanceSheetRunning(models.Model):
     account_code = models.CharField(max_length=50)
     account_name = models.CharField(max_length=255)
     account_type = models.CharField(max_length=50)
-    balance_to_date = models.DecimalField(max_digits=18, decimal_places=2)
+    balance_to_date_original = models.DecimalField(max_digits=18, decimal_places=2)
+    balance_to_date_local = models.DecimalField(max_digits=18, decimal_places=2)
 
     class Meta:
         managed = False   

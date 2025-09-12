@@ -64,3 +64,12 @@ class TenantManager(BaseUserManager): # Inherits from BaseUserManager (so you do
         if extra_fields.get("is_staff") is not True or extra_fields.get("is_superuser") is not True:
             raise ValueError("Superuser must have is_staff=True and is_superuser=True")
         return self._create_user(username, email, password, **extra_fields)
+    
+# Add company's default currency to JournalLine
+class JournalLineCurrencyManager(models.Manager):
+    def create_for_entry(self, journal_entry, **kwargs): # pass company linked journal_entry
+        if "currency" not in kwargs: # if no currency is provided 
+            # fill in company’s default currency
+            kwargs["currency"] = journal_entry.company.default_currency
+        # call normal create()
+        return super().create(journal_entry=journal_entry, **kwargs)

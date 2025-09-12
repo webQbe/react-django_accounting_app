@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('accounts_core', '0010_mv_pl_period'),
+        ('accounts_core', '0011_mv_pl_period'),
     ]
 
     """  Balance Sheet (snapshot):
@@ -24,7 +24,8 @@ class Migration(migrations.Migration):
                     t.account_code,
                     t.account_name,
                     t.account_type,
-                    t.balance_to_date
+                    t.balance_to_date_original,
+                    t.balance_to_date_local
                 FROM mv_trial_balance_running t
                 WHERE t.account_type IN ('Asset','Liability','Equity');
 
@@ -34,7 +35,10 @@ class Migration(migrations.Migration):
                 reverse_sql="DROP MATERIALIZED VIEW mv_balance_sheet_running;"
             ),
             
-        """ SQL schema definition:
+        ]
+    
+
+    """ SQL schema definition:
         - Creating a materialized view called mv_balance_sheet_running
             - “Running” means it accumulates balances up to date (not just per period).
             - It's based on mv_trial_balance_running view.
@@ -44,6 +48,4 @@ class Migration(migrations.Migration):
         - UNIQUE INDEX ensures uniqueness on (company_id, account_id)
             - Prevents duplicate rows for the same account in a company.
             - Speeds up lookups
-        """     
-            
-        ]
+    """     

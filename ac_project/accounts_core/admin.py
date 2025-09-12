@@ -302,7 +302,7 @@ class JournalEntryAdmin(admin.ModelAdmin):
 # Register `JournalLine` model 
 @admin.register(models.JournalLine)
 class JournalLineAdmin(admin.ModelAdmin):
-    list_display = ("id", "company", "journal", "account", "debit_amount", "credit_amount", "is_posted")
+    list_display = ("id", "company", "journal", "account", "debit_original", "credit_original", "debit_local", "credit_local", "is_posted")
     list_filter = ("company", "account")
     search_fields = ("description",)
     readonly_fields = ("is_posted",)
