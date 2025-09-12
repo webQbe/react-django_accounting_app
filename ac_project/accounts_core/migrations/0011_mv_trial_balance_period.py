@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('accounts_core', '0008_mv_jl_agg_period'),
+        ('accounts_core', '0010_update_mv_jl_agg_period'),
     ]
 
     """ Trial Balance (period-based): 

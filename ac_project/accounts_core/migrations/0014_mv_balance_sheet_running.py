@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('accounts_core', '0011_mv_pl_period'),
+        ('accounts_core', '0013_mv_pl_period'),
     ]
 
     """  Balance Sheet (snapshot):

@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('accounts_core', '0009_mv_trial_balance_period'),
+        ('accounts_core', '0008_mv_jl_agg_period'),
     ]
 
     """ Running Trial Balance Up to date:
@@ -17,6 +17,7 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunSQL(
             """  
+            DROP MATERIALIZED VIEW IF EXISTS mv_trial_balance_running CASCADE;
             CREATE MATERIALIZED VIEW mv_trial_balance_running AS
             SELECT
                 jl.company_id,

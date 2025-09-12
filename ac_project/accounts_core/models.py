@@ -767,14 +767,14 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
     def clean(self):
         # Ensures no negative values sneak in
         # (redundant with CheckConstraint but useful at app-level)
-        if self.debit_amount < 0 or self.credit_amount < 0:
+        if self.debit_original < 0 or self.credit_original < 0:
             raise ValidationError("Debit and credit must be >= 0")
         
         # ensure debit xor credit or both allowed? 
         # Usually one is zero.
-        if (self.debit_amount > 0) and (self.credit_amount > 0):
+        if (self.debit_original > 0) and (self.credit_original > 0):
             raise ValidationError("JournalLine should not have both debit and credit > 0")
-        if (self.debit_amount == 0) and (self.credit_amount == 0):
+        if (self.debit_original == 0) and (self.credit_original == 0):
             raise ValidationError("JournalLine requires a non-zero amount on either debit or credit")
        
         # Invoice and Bill cannot both be set
@@ -809,6 +809,18 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
             raise ValidationError("Bill postings must use a control AP account.")
         if self.fixed_asset and not self.account.is_control_account:
             raise ValidationError("Fixed asset postings must use a control account.")
+
+    
+    """ Treat fx_rate as 1.0 when it is NULL """
+    @property
+    def effective_fx_rate(self):
+        # if fx_rate is NULL, pretend it's 1.0
+        return self.fx_rate if self.fx_rate is not None else Decimal("1.0")
+
+    @property
+    def amount_local_computed(self):
+        # always safe, because we fallback to 1.0
+        return self.amount_original * self.effective_fx_rate
 
 
     # save() override    

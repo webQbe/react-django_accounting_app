@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('accounts_core', '0010_mv_trial_balance_running'),
+        ('accounts_core', '0012_update_mv_trial_balance_running'),
     ]
 
     """ Profit & Loss (period-based):

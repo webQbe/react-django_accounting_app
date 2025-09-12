@@ -11,7 +11,7 @@ def backfill_currency(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("accounts_core", "0012_mv_balance_sheet_running"),  # adjust if your last migration has a different name
+        ("accounts_core", "0014_mv_balance_sheet_running"),  # adjust if your last migration has a different name
     ]
 
     operations = [
