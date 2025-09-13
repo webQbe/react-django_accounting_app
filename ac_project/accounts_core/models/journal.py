@@ -1,0 +1,374 @@
+from django.db import models,  transaction   # ORM base classes to define database tables as Python classes
+from django.utils import timezone   
+from django.conf import settings    # To access global project settings
+from django.core.exceptions import ValidationError  # Built-in way to raise validation errors
+from decimal import Decimal         # Used for exact decimal arithmetic (money values, accounting entries)
+from .entitymembership import Company, Currency
+from ..managers import TenantManager, JournalLineCurrencyManager
+from .period import Period
+from .account import Account
+
+
+JOURNAL_STATUS = [
+    ("draft", "Draft"),       # still editable
+    ("ready", "Ready"),       # validated but not yet posted
+    ("posted", "Posted"),     # finalized
+]
+
+# ---------- Journal (Header) & JournalLine ----------
+class JournalEntry(models.Model): # Represents one accounting transaction 
+    # Header-level info
+    # Multi-tenant: every entry belongs to a company
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    # Optional link to an accounting period (for reporting, closing)
+    period = models.ForeignKey(
+                                Period, null=True, blank=True, 
+                                on_delete=models.PROTECT # Prevent breaking historical ledger
+                            )
+    # Business metadata
+    date = models.DateField()
+    reference = models.CharField(max_length=200, null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
+    status = models.CharField(
+                        max_length=10, 
+                        choices=JOURNAL_STATUS, 
+                        default="draft" 
+                        """ JournalEntry workflow:
+                            ("Draft") # still editable
+                            ("Ready") # validated but not yet posted
+                            ("Posted") # finalized
+                        """
+                        )
+    posted_at = models.DateTimeField(null=True, blank=True)
+    # Track user who created it
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    # optional polymorphic source info (invoice, bill, bank txn, fixed asset actions)
+    source_type = models.CharField(max_length=50, null=True, blank=True) # Helps trace back where the JE originated
+    source_id = models.BigIntegerField(null=True, blank=True)
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
+
+    class Meta:
+        # Speed up listing & filtering (e.g. show all posted entries this month)
+        indexes = [models.Index(fields=["company", "date"]), models.Index(fields=["company", "status"])]
+
+        constraints = [
+            # Within one company, each journal entry must be unique
+            # Across companies, duplicates are allowed
+            models.UniqueConstraint(
+                                    fields=["company", "reference"], 
+                                    name="uq_je_company_ref"
+                                )
+        ]     
+    def __str__(self):
+        return f"JE {self.pk} {self.date} [{self.status}]"
+
+    # Aggregate all debit and credit amounts across entry’s lines
+    def compute_totals(self):
+        """Return debits, credits sums for lines"""
+        aggs = self.journalline_set.aggregate(
+            total_debit=models.Sum("debit_amount"),
+            total_credit=models.Sum("credit_amount"),
+        )
+        return (aggs["total_debit"] or Decimal("0.0"), aggs["total_credit"] or Decimal("0.0"))
+
+    # True if double-entry rule holds: total debits = total credits
+    def is_balanced(self):
+        debit, credit = self.compute_totals()
+        return (debit == credit)
+
+    # Post the entry safely inside a database transaction
+    def post(self, user=None):
+        """
+           Enforce accounting correctness (balanced, immutable, tenant-safe) and
+           Update snapshots
+        """
+        # lazy import to avoid circular import at module load time
+        from ..services import update_snapshots_for_journal
+
+        with transaction.atomic(): # Wrap whole posting process in a single DB transaction
+            # Lock all journal lines to prevent race conditions
+            # so no other transaction can modify them while posting is in progress
+            lines = JournalLine.objects.select_for_update().filter(journal=self)
+
+            """ Business validations """
+            if not lines.exists(): # Prevent posting an empty entry
+                raise ValidationError("JournalEntry must have at least one JournalLine.")
+
+            # Recompute totals fresh from DB & ignore any stale cached values
+            total_debit = Decimal('0.00')
+            total_credit = Decimal('0.00')
+            for l in lines:
+                total_debit += l.debit_amount or Decimal('0.00')
+                total_credit += l.credit_amount or Decimal('0.00')
+
+            # Enforce double-entry rule: debits = credits
+            if total_debit != total_credit:
+                raise ValidationError("Journal does not balance: debits != credits")
+
+            # Journals are immutable once posted. Prevent double posting
+            if self.status.posted:
+                raise ValidationError("Journal already posted")
+
+            # Enforce tenant consistency
+            # every line must belong to same company as journal
+            if lines.exclude(company=self.company).exists():
+                raise ValidationError("All journal lines must belong to same company as journal.")
+            
+            # Check period
+            if self.period.exclude(company=self.company).exists():
+                raise ValidationError("Period must belong to same company as journal")
+            
+            # Check creator
+            if self.created_by.exclude(company=self.company).exists():
+                raise ValidationError("Creator must belong to same company as journal")
+            
+            # Ensure periods open
+            if self.period and self.period.is_closed:
+                raise ValidationError("Period is closed")
+            
+            
+            """ Update state """
+            self.status.posted = True # Mark journal as posted
+            self.posted_at = timezone.now() # Timestamp
+            if user:
+                self.created_by = user
+            self.save(update_fields=["posted", "posted_at", "created_by"])
+
+            # mark all lines as posted (bulk update)
+            lines.update(is_posted=True)
+
+        # Service layer function to trigger snapshot update
+        # Recalculates AccountBalanceSnapshot for all accounts affected by this journal
+        update_snapshots_for_journal(self) 
+
+    def clean(self):
+        """ Don't modify posted journals """
+        if self.pk and self.status.posted: # If it has a primary key and status is posted, it's an update
+            # Load original DB version before edits
+            orig = JournalEntry.objects.get(pk=self.pk)
+            # if attempting to change any core fields after posted
+            if orig.status.posted:
+                changed = False # allow no changes if posted (strict)
+                # compare changes in "description", "period_id" fields
+                for f in ("description", "period_id"):
+                    if getattr(orig, f) != getattr(self, f):
+                         # If they differ, then user is trying to change something after posting
+                        changed = True 
+                if changed:
+                    # Block the save with a ValidationError
+                    raise ValidationError("Cannot modify a posted JournalEntry. It is immutable.")
+
+        """ Don't allow journals in closed periods """
+        if self.period and self.period.is_closed:
+            # If journal is assigned to a period, and the period is marked closed
+            # Reject save
+            raise ValidationError("Cannot create or edit journal inside a closed period.")
+
+    def save(self, *args, **kwargs):
+        if self.pk: # Does this row already exist in DB?
+            # Fetch "original" row to update
+            orig = JournalEntry.objects.get(pk=self.pk) 
+            # Check if journal was already posted   
+            if orig.status == "posted" and self.status != "posted":
+                # disallow toggling posted flag
+                raise ValidationError("Cannot unpost a posted journal")
+                """ If self.status != "posted" → the user is trying to change status 
+                    back to "draft" (or anything else). """  
+            
+        # If validation passes, continue with normal save
+        super().save(*args, **kwargs)
+
+    # Control status changes
+    def transition_to(self, new_status, user=None):
+        allowed = {
+            "draft": ["ready", "posted"],
+            "ready": ["posted"],
+            "posted": [],
+        }
+        # if later you add `archived` or `void` states, you just update the dictionary
+
+        # prevent skipping validations
+        if new_status not in allowed.get(self.status, []):
+            raise ValidationError(f"Cannot go from {self.status} to {new_status}")
+
+        if new_status == "posted":
+            # call posting logic (validations, mark lines as is_posted, etc.)
+            self.post(user=user)
+        else:
+            # just update the status
+            self.status = new_status
+            self.save(update_fields=["status"])
+
+class JournalLine(models.Model): # Stores Lines ( credits / debits )
+    """
+    Each line belongs to a journal entry and to a GL account.
+    Optional foreign keys to invoice/bill/banktransaction/fixedasset for traceability.
+    """
+    # Belongs to company & a journal entry
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    journal = models.ForeignKey(JournalEntry, on_delete=models.CASCADE)
+
+    # Must point to one Account (can’t delete account if lines exist → PROTECT)
+    account = models.ForeignKey(Account, on_delete=models.PROTECT)
+
+    # Description 
+    description = models.CharField(max_length=400, null=True, blank=True)
+
+    # Original currency amounts & the debit/credit split
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
+    debit_original = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    credit_original = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+
+    # Conversion
+    fx_rate = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+
+    # Local (functional currency) amounts
+    debit_local = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    credit_local = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    
+    # Link each posting line back to the business object that caused it
+    invoice = models.ForeignKey("Invoice", null=True, blank=True, on_delete=models.SET_NULL)
+    bill = models.ForeignKey("Bill", null=True, blank=True, on_delete=models.SET_NULL)
+    bank_transaction = models.ForeignKey(  "BankTransaction", 
+                                            null=True, blank=True, 
+                                            # on deleting a bank transaction
+                                            on_delete=models.PROTECT # prevent breaking audit trails
+                                         )
+    fixed_asset = models.ForeignKey(
+                                    "FixedAsset", null=True, blank=True,
+                                    # on deleting a fixed_asset 
+                                    on_delete=models.PROTECT # do not remove posted journal entries
+                                 )
+
+    # audit / immutability marker (populated when journal posted)
+    is_posted = models.BooleanField(default=False) # prevents edits later
+
+    # Custom managers
+    objects = TenantManager() # Enforce tenant scoping
+    with_currency = JournalLineCurrencyManager() # autofill right currency
+
+    class Meta:
+        # For fast queries like “all lines for this account” / “all lines in this JE.”
+        indexes = [
+            models.Index(fields=["company", "account"]),
+            models.Index(fields=["company", "journal"]),
+        ]
+
+        # Enforce debits and credits must be non-negative
+        """ You can optionally add a CHECK constraint in Postgres to 
+            prevent both debit & credit > 0 and at least one of them non-zero. 
+            Django 3.2+ supports CheckConstraint. """
+        constraints = [
+            models.CheckConstraint(
+                check=(models.Q(debit_original__gte=0) & models.Q(credit_original__gte=0)), 
+                name="jl_non_negative_original_amounts"
+            ),
+            models.CheckConstraint(
+                check=(models.Q(debit_local__gte=0) & models.Q(credit_local__gte=0)), 
+                name="jl_non_negative_local_amounts"
+            ),
+            models.CheckConstraint(
+                check=~(models.Q(debit_original=0) & models.Q(credit_original=0)),
+                name="debit_xor_credit_nonzero_original"
+            ),
+            models.CheckConstraint(
+                check=~(models.Q(debit_local=0) & models.Q(credit_local=0)),
+                name="debit_xor_credit_nonzero_local"
+            ),
+            models.CheckConstraint(
+                check=models.Q(fx_rate__isnull=True) | models.Q(fx_rate__gt=0),
+                name="fx_rate_null_or_positive"
+            ),
+        ]
+
+    # Show journal, account, and amounts in admin dropdowns and debug logs 
+    def __str__(self):
+        return f"{self.journal_id} | {self.account.code} {self.account.name} | D:{self.debit_amount or 0} C:{self.credit_amount or 0}"
+   
+    # Business logic validation: 
+    # - Debit/credit should always be non-negative
+    # - Prevent mixing payable and receivable logic on one line
+    # - Prevent “cross-company” contamination 
+    def clean(self):
+        # Ensures no negative values sneak in
+        # (redundant with CheckConstraint but useful at app-level)
+        if self.debit_original < 0 or self.credit_original < 0:
+            raise ValidationError("Debit and credit must be >= 0")
+        
+        # ensure debit xor credit or both allowed? 
+        # Usually one is zero.
+        if (self.debit_original > 0) and (self.credit_original > 0):
+            raise ValidationError("JournalLine should not have both debit and credit > 0")
+        if (self.debit_original == 0) and (self.credit_original == 0):
+            raise ValidationError("JournalLine requires a non-zero amount on either debit or credit")
+       
+        # Invoice and Bill cannot both be set
+        # A journal line can link to either an invoice or a bill, but never both
+        if self.invoice and self.bill:
+            raise ValidationError("JournalLine cannot reference both invoice and bill.")
+        
+        # Company consistency
+        # Every line must belong to same company as its parent journal
+        if self.journal and self.company != self.journal.company:
+            raise ValidationError("JournalLine.company must equal JournalEntry.company")
+        # Ensure account chosen belongs to the same company
+        if self.account and self.account.company != self.company:
+            raise ValidationError("JournalLine.account must belong to the same company.")
+        # Ensure invoice chosen belongs to the same company
+        if self.invoice and self.invoice.company != self.company:
+            raise ValidationError("JournalLine.invoice must belong to the same company.")
+        # Ensure bill chosen belongs to the same company
+        if self.bill and self.bill.company != self.company:
+            raise ValidationError("JournalLine.bill must belong to the same company.")
+        # Ensure bank transaction chosen belongs to the same company
+        if self.bank_transaction and self.bank_transaction.company != self.company:
+            raise ValidationError("JournalLine.bank_transaction must belong to the same company.")
+        # Ensure fixed asset chosen belongs to the same company
+        if self.fixed_asset and self.fixed_asset.company != self.company:
+            raise ValidationError("JournalLine.fixed_asset must belong to the same company.")
+
+        # Check if an Invoice/Bill/Asset references a non-control account → block it
+        if self.invoice and not self.account.is_control_account:
+            raise ValidationError("Invoice postings must use a control AR account.")
+        if self.bill and not self.account.is_control_account:
+            raise ValidationError("Bill postings must use a control AP account.")
+        if self.fixed_asset and not self.account.is_control_account:
+            raise ValidationError("Fixed asset postings must use a control account.")
+
+        # Check if fx_rate valid 
+        if self.currency != self.journal.company.default_currency:
+            if self.fx_rate is None or self.fx_rate <= 0:
+                raise ValidationError("fx_rate must be > 0 when currency differs")
+        elif self.fx_rate not in (None, 1.0):
+            raise ValidationError("fx_rate must be None or 1.0 for default currency")
+            
+
+    """ Treat fx_rate as 1.0 when it is NULL """
+    @property
+    def effective_fx_rate(self):
+        # if fx_rate is NULL, pretend it's 1.0
+        return self.fx_rate if self.fx_rate is not None else Decimal("1.0")
+
+    @property
+    def amount_local_computed(self):
+        # always safe, because we fallback to 1.0
+        return self.amount_original * self.effective_fx_rate
+
+
+    # save() override    
+    def save(self, *args, **kwargs):
+
+        """  Calculate debit_local / credit_local:
+            - Local amounts are always stored, ready for reporting without recomputation.
+            - If fx_rate or original amounts change, local fields are updated.
+        """
+        rate = self.fx_rate or 1.0  # treat None as 1.0
+        self.debit_local = self.debit_original * rate
+        self.credit_local = self.credit_original * rate
+
+        # clean()+field validation always run whenever 
+        # you save a JournalLine programmatically
+        self.full_clean() 
+        return super().save(*args, **kwargs)
