@@ -810,7 +810,14 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
         if self.fixed_asset and not self.account.is_control_account:
             raise ValidationError("Fixed asset postings must use a control account.")
 
-    
+        # Check if fx_rate valid 
+        if self.currency != self.journal.company.default_currency:
+            if self.fx_rate is None or self.fx_rate <= 0:
+                raise ValidationError("fx_rate must be > 0 when currency differs")
+        elif self.fx_rate not in (None, 1.0):
+            raise ValidationError("fx_rate must be None or 1.0 for default currency")
+            
+
     """ Treat fx_rate as 1.0 when it is NULL """
     @property
     def effective_fx_rate(self):
@@ -825,7 +832,17 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
 
     # save() override    
     def save(self, *args, **kwargs):
-        # clean()+field validation always run whenever you save a JournalLine programmatically
+
+        """  Calculate debit_local / credit_local:
+            - Local amounts are always stored, ready for reporting without recomputation.
+            - If fx_rate or original amounts change, local fields are updated.
+        """
+        rate = self.fx_rate or 1.0  # treat None as 1.0
+        self.debit_local = self.debit_original * rate
+        self.credit_local = self.credit_original * rate
+
+        # clean()+field validation always run whenever 
+        # you save a JournalLine programmatically
         self.full_clean() 
         return super().save(*args, **kwargs)
 
