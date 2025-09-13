@@ -68,8 +68,8 @@ class JournalEntry(models.Model): # Represents one accounting transaction
     def compute_totals(self):
         """Return debits, credits sums for lines"""
         aggs = self.journalline_set.aggregate(
-            total_debit=models.Sum("debit_amount"),
-            total_credit=models.Sum("credit_amount"),
+            total_debit=models.Sum("debit_local"),
+            total_credit=models.Sum("credit_local"),
         )
         return (aggs["total_debit"] or Decimal("0.0"), aggs["total_credit"] or Decimal("0.0"))
 
@@ -99,16 +99,14 @@ class JournalEntry(models.Model): # Represents one accounting transaction
             # Recompute totals fresh from DB & ignore any stale cached values
             total_debit = Decimal('0.00')
             total_credit = Decimal('0.00')
-            for l in lines:
-                total_debit += l.debit_amount or Decimal('0.00')
-                total_credit += l.credit_amount or Decimal('0.00')
-
+            total_debit, total_credit = self.compute_totals()
+            
             # Enforce double-entry rule: debits = credits
             if total_debit != total_credit:
                 raise ValidationError("Journal does not balance: debits != credits")
 
             # Journals are immutable once posted. Prevent double posting
-            if self.status.posted:
+            if self.status == "posted" :
                 raise ValidationError("Journal already posted")
 
             # Enforce tenant consistency
@@ -130,11 +128,11 @@ class JournalEntry(models.Model): # Represents one accounting transaction
             
             
             """ Update state """
-            self.status.posted = True # Mark journal as posted
+            self.status = "posted" # Mark journal as posted
             self.posted_at = timezone.now() # Timestamp
             if user:
                 self.created_by = user
-            self.save(update_fields=["posted", "posted_at", "created_by"])
+            self.save(update_fields=["status", "posted_at", "created_by"])
 
             # mark all lines as posted (bulk update)
             lines.update(is_posted=True)
@@ -145,7 +143,7 @@ class JournalEntry(models.Model): # Represents one accounting transaction
 
     def clean(self):
         """ Don't modify posted journals """
-        if self.pk and self.status.posted: # If it has a primary key and status is posted, it's an update
+        if self.pk and self.status == "posted": # If it has a primary key and status is posted, it's an update
             # Load original DB version before edits
             orig = JournalEntry.objects.get(pk=self.pk)
             # if attempting to change any core fields after posted
