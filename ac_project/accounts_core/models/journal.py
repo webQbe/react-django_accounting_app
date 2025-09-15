@@ -1,3 +1,5 @@
+import hashlib
+import json
 from django.db import models,  transaction   # ORM base classes to define database tables as Python classes
 from django.utils import timezone   
 from django.conf import settings    # To access global project settings
@@ -8,6 +10,8 @@ from ..managers import TenantManager, JournalLineCurrencyManager
 from ..exceptions import UnbalancedJournalError
 from .period import Period
 from .account import Account
+from ..exceptions import AlreadyPostedDifferentPayload
+
 
 
 JOURNAL_STATUS = [
@@ -46,6 +50,9 @@ class JournalEntry(models.Model): # Represents one accounting transaction
     # optional polymorphic source info (invoice, bill, bank txn, fixed asset actions)
     source_type = models.CharField(max_length=50, null=True, blank=True) # Helps trace back where the JE originated
     source_id = models.BigIntegerField(null=True, blank=True)
+    # Fingerprint-based idempotency (safe to call twice if nothing has changed)
+    posting_fingerprint = models.CharField(max_length=64, null=True, blank=True)
+
 
     # Enforce tenant scoping
     objects = TenantManager() 
@@ -68,7 +75,7 @@ class JournalEntry(models.Model): # Represents one accounting transaction
     # Aggregate all debit and credit amounts across entry’s lines
     def compute_totals(self):
         """Return debits, credits sums for lines"""
-        aggs = self.journalline_set.aggregate(
+        aggs = self.lines.aggregate(
             total_debit=models.Sum("debit_local"),
             total_credit=models.Sum("credit_local"),
         )
@@ -79,72 +86,117 @@ class JournalEntry(models.Model): # Represents one accounting transaction
         debit, credit = self.compute_totals()
         return (debit == credit)
 
+    def _posting_payload(self):
+        """Deterministic representation of what matters for posting
+
+           Deterministic = no matter when or how you call it, if the data hasn't changed, 
+           the JSON string will always look the same.
+           
+           Creates a consistent JSON "snapshot" of the important accounting data in 
+           a journal entry, so you can later check whether that exact version 
+           has already been posted.
+        """
+        lines = [
+            {
+                "acct": l.account_id,
+                "debit": str(l.debit_original),
+                "credit": str(l.credit_original),
+                "desc": l.description or "",
+            }
+            # Get all lines for this journal entry, always in the same order (id ascending)
+            # For each line l, build a dict with fields that matter for posting
+            for l in self.lines.order_by("id").all()
+        ]
+
+        # Build a dictionary for the whole journal
+        payload = {
+            "company": self.company_id,    
+            "date": self.date.isoformat(), # Date (always in ISO format like "2025-09-15")
+            "lines": lines,                # Lines (from above)
+        }
+
+        # Converts payload dict into a compact JSON string
+        return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+    def _fingerprint(self):
+        # hash (sha256) JSON string from _posting_payload() to produce a fingerprint
+        return hashlib.sha256(self._posting_payload().encode()).hexdigest()
+    
     # Post the entry safely inside a database transaction
+    @transaction.atomic
     def post(self, user=None):
         """
-           Enforce accounting correctness (balanced, immutable, tenant-safe) and
-           Update snapshots
+           Safely post a journal entry with validations, idempotency, and snapshots.
         """
+
+        # Lock row + lines to prevent concurrent modifications
+        je = JournalEntry.objects.select_for_update().get(pk=self.pk)
+
+        # Lock all journal lines to prevent race conditions
+        # so no other transaction can modify them while posting is in progress
+        lines = je.lines.select_for_update().all()
+        
         # lazy import to avoid circular import at module load time
         from ..services import update_snapshots_for_journal
 
-        with transaction.atomic(): # Wrap whole posting process in a single DB transaction
-            # Lock all journal lines to prevent race conditions
-            # so no other transaction can modify them while posting is in progress
-            lines = JournalLine.objects.select_for_update().filter(journal=self)
+        """ Business validations """
+        if not lines.exists(): # Prevent posting an empty entry
+            raise ValidationError("JournalEntry must have at least one JournalLine.")
 
-            """ Business validations """
-            if not lines.exists(): # Prevent posting an empty entry
-                raise ValidationError("JournalEntry must have at least one JournalLine.")
+        # Recompute totals fresh from DB & ignore any stale cached values
+        total_debit = Decimal('0.00')
+        total_credit = Decimal('0.00')
+        total_debit, total_credit = self.compute_totals()
+            
+        # Enforce double-entry rule: debits = credits
+        if total_debit != total_credit:
+            # Use custom exception
+            raise UnbalancedJournalError(
+                f"Journal not balanced: debits={total_debit}, credits={total_credit}"
+            )
 
-            # Recompute totals fresh from DB & ignore any stale cached values
-            total_debit = Decimal('0.00')
-            total_credit = Decimal('0.00')
-            total_debit, total_credit = self.compute_totals()
+        # Enforce tenant consistency
+        # every line must belong to same company as journal
+        if lines.exclude(company=self.company).exists():
+            raise ValidationError("All journal lines must belong to same company as journal.")
             
-            # Enforce double-entry rule: debits = credits
-            if total_debit != total_credit:
-                # Use custom exception
-                raise UnbalancedJournalError(
-                    f"Journal not balanced: debits={total_debit}, credits={total_credit}"
-                )
+        # Check period
+        if je.period and je.period.company != je.company:
+            raise ValidationError("Period must belong to the same company as journal")
+            
+        # Ensure periods open
+        if je.period and je.period.is_closed:
+            raise ValidationError("Period is closed")
+        
+        # Compute fingerprint
+        fp = je._fingerprint()
+            
+        """ Idempotency & immutability """
+        if je.status == "posted":
+            if je.posting_fingerprint == fp:
+                # Idempotent: safe to return without raising
+                return je
+            raise AlreadyPostedDifferentPayload(
+                "Journal already posted with different payload. Use unpost/reversal."
+            )
 
-            # Journals are immutable once posted. Prevent double posting
-            if self.status == "posted" :
-                raise ValidationError("Journal already posted")
 
-            # Enforce tenant consistency
-            # every line must belong to same company as journal
-            if lines.exclude(company=self.company).exists():
-                raise ValidationError("All journal lines must belong to same company as journal.")
-            
-            # Check period
-            if self.period and self.period.company != self.company:
-                raise ValidationError("Period must belong to the same company as journal")
+        """ Update state """
+        je.status = "posted" # Mark journal as posted
+        je.posted_at = timezone.now() # Timestamp
+        if user:
+            je.created_by = user
+        je.posting_fingerprint = fp
+        je.save(update_fields=["status", "posted_at", "created_by", "posting_fingerprint"])
 
-            
-            # Check creator
-            if self.created_by and self.user.company != self.company:
-                raise ValidationError("Creator must belong to same company as journal")
-            
-            # Ensure periods open
-            if self.period and self.period.is_closed:
-                raise ValidationError("Period is closed")
-            
-            
-            """ Update state """
-            self.status = "posted" # Mark journal as posted
-            self.posted_at = timezone.now() # Timestamp
-            if user:
-                self.created_by = user
-            self.save(update_fields=["status", "posted_at", "created_by"])
-
-            # mark all lines as posted (bulk update)
-            lines.update(is_posted=True)
+        # mark all lines as posted (bulk update)
+        lines.update(is_posted=True)
 
         # Service layer function to trigger snapshot update
         # Recalculates AccountBalanceSnapshot for all accounts affected by this journal
-        update_snapshots_for_journal(self) 
+        update_snapshots_for_journal(je) 
+        return je
+
 
     def clean(self):
         """ Don't modify posted journals """
@@ -211,7 +263,10 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
     """
     # Belongs to company & a journal entry
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
-    journal = models.ForeignKey(JournalEntry, on_delete=models.CASCADE)
+    journal = models.ForeignKey(
+                                JournalEntry, on_delete=models.CASCADE, 
+                                related_name="lines" # default reverse name
+                             )
 
     # Must point to one Account (can’t delete account if lines exist → PROTECT)
     account = models.ForeignKey(Account, on_delete=models.PROTECT)
@@ -220,7 +275,7 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
     description = models.CharField(max_length=400, null=True, blank=True)
 
     # Original currency amounts & the debit/credit split
-    currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, default="USD")  # force a default
     debit_original = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     credit_original = models.DecimalField(max_digits=18, decimal_places=2, default=0)
 
