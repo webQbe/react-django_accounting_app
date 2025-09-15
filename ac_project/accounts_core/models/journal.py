@@ -115,11 +115,12 @@ class JournalEntry(models.Model): # Represents one accounting transaction
                 raise ValidationError("All journal lines must belong to same company as journal.")
             
             # Check period
-            if self.period.exclude(company=self.company).exists():
-                raise ValidationError("Period must belong to same company as journal")
+            if self.period and self.period.company != self.company:
+                raise ValidationError("Period must belong to the same company as journal")
+
             
             # Check creator
-            if self.created_by.exclude(company=self.company).exists():
+            if self.created_by and self.user.company != self.company:
                 raise ValidationError("Creator must belong to same company as journal")
             
             # Ensure periods open

@@ -5,7 +5,6 @@ from ..managers import TenantManager
 from .entitymembership import Company
 from .account import Account
 from .vendor import Vendor
-from .banking import BankTransactionBill
 from .item import Item
 
 BILL_STATUS_CHOICES = [
@@ -64,6 +63,7 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
     def __str__(self):
         # If no bill number, fall back to database ID
         return f"Bill: {self.bill_number or self.pk}"
+    
 
     """ Ensure bill's stored totals are always in sync with its lines and payments """
     def recalc_totals(self): # Recompute bill totals every time
@@ -72,7 +72,8 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
         # Calculate sum of all BillLine.line_totals
         total = sum((l.line_total for l in lines), Decimal('0.00'))
         self.total = total  # Set total
-        
+
+        from .banking import BankTransactionBill
         # Sum of all applied payments
         paid = sum(bt.applied_amount for bt in BankTransactionBill.objects.filter(bill=self))
        
@@ -122,6 +123,7 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
 
     """ Prevent deleting bills that already have payments applied """
     def delete(self, *args, **kwargs):
+        from .banking import BankTransactionBill
         has_payments = BankTransactionBill.objects.filter(bill=self).exists()
         if has_payments:
             raise ValidationError("Cannot delete a bill with applied payments.")

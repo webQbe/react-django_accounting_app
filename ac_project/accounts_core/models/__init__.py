@@ -1,13 +1,13 @@
 from .journal import JournalEntry, JournalLine
-from .invoice import Invoice, InvoiceLine
+from .invoice import Invoice, InvoiceLine, BankTransactionInvoice
 from .bill import Bill, BillLine 
 from .ac_category import AccountCategory
 from .account import Account
 from .auditlog import AuditLog
 from .fixed_asset import FixedAsset
-from .banking import BankAccount, BankTransaction, BankTransactionInvoice, BankTransactionBill 
+from .banking import BankAccount, BankTransaction, BankTransactionBill 
 from .currency import Currency
-from .customer import Company
+from .customer import Customer
 from .entitymembership import Company, User, EntityMembership
 from .item import Item
 from .period import Period

@@ -5,7 +5,7 @@ from ..managers import TenantManager
 from .entitymembership import Company
 from .account import Account
 from .customer import Customer
-from .banking import BankTransactionInvoice
+from .banking import BankTransaction
 from .item import Item
 
 INV_STATUS_CHOICES = [
@@ -16,7 +16,6 @@ INV_STATUS_CHOICES = [
 
 
 
-# ---------- Invoices / InvoiceLines ----------
 class Invoice(models.Model): # Represents a customer invoice
     
     # Invoice belongs to one company (multi-tenant)
@@ -248,4 +247,66 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
         self.line_total = (self.quantity or Decimal('0')) * (self.unit_price or Decimal('0')) 
         # Run validation, this will call clean()
         self.full_clean() 
+        return super().save(*args, **kwargs)
+    
+
+class BankTransactionInvoice(models.Model): # Bridge table for applying bank transactions to invoices (AR settlements)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    # Many-to-many relationship between BankTransaction & Invoice
+    bank_transaction = models.ForeignKey(BankTransaction, on_delete=models.CASCADE)
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE)
+    # Allow partial application (e.g. $100 payment applied to a $250 invoice)
+    applied_amount = models.DecimalField(max_digits=18, decimal_places=2)
+
+    # Enforce tenant scoping
+    objects = TenantManager() 
+
+    class Meta:
+        indexes = [models.Index(fields=["company", "bank_transaction"]), 
+                   models.Index(fields=["company", "invoice"])]
+        
+        
+        constraints = [
+            # Each bank transaction can be linked to the same invoice only once
+            models.UniqueConstraint(
+                                    fields=["bank_transaction", "invoice"], 
+                                    name="unique_bank_tx_invoice"
+                                ),
+            # Ensure applied_amount is never negative                    
+            models.CheckConstraint(
+                                    check=models.Q(applied_amount__gte=0),
+                                    name="bt_inv_non_negative_amounts",
+                                ),
+            ]
+
+    # Show bank_transaction, invoice_number, and applied_amount in admin dropdowns and debug logs 
+    def __str__(self):
+        return f"BT: {self.bank_transaction} → Inv: {self.invoice.invoice_number} Amt: ({self.applied_amount})"
+        
+    def clean(self):
+        # You can’t apply negative payment
+        if self.applied_amount < 0: 
+            raise ValidationError("Applied must be non-negative")
+        
+        # cannot apply more than outstanding
+        # prevent “overpayment” situations where invoice would go negative
+        if self.applied_amount > self.invoice.outstanding_amount:
+            raise ValidationError("Applied amount cannot exceed invoice outstanding")
+        
+        # Prevent cross-company contamination
+        # Ensure Bank transaction chosen belongs to the same company
+        if self.bank_transaction and self.bank_transaction.company != self.company:
+            raise ValidationError("Bank transaction must belong to the same company.")
+        
+        # Ensure invoice chosen belongs to the same company
+        if self.invoice and self.invoice.company != self.company:
+            raise ValidationError("Invoice must belong to the same company.")
+        
+        """ You can't accidentally link a BankTransaction 
+            from Company A to an Invoice from Company B. """
+        if self.invoice.company != self.bank_transaction.company:
+            raise ValidationError("Invoice and BankTransaction must belong to same company")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run validations before saving
         return super().save(*args, **kwargs)

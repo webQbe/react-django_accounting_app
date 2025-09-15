@@ -4,7 +4,6 @@ from ..managers import TenantManager
 from django.core.exceptions import ValidationError  # Built-in way to raise validation errors
 from decimal import Decimal         # Used for exact decimal arithmetic (money values, accounting entries)
 from .ac_category import AccountCategory
-from .journal import JournalLine
 
 # Choice Lists
 AC_TYPES = [
@@ -108,9 +107,11 @@ class Account(models.Model): # Actual ledger account entry in Chart of Accounts
 
         # If account was active before, but now being set to inactive
         if old and old.is_active and not self.is_active:
+            from .journal import JournalLine
             # check usage (referenced in transactions)
             used = JournalLine.objects.filter(account=self).exists()
             if used: # if referenced prevent from deactivating account 
                 raise ValidationError("Cannot disable an account that is used in journal lines.")
+        return super().save(*args, **kwargs)
         return super().save(*args, **kwargs)
     

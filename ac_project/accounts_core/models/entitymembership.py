@@ -3,6 +3,7 @@ from django.conf import settings    # To access global project settings
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError  # Built-in way to raise validation errors
 from ..managers import TenantManager
+from .currency import Currency
 
 
 # ---------- Tenant / Company ----------
