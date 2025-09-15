@@ -192,8 +192,8 @@ def update_snapshots_for_journal(journal: JournalEntry):
         )
         # Update debit/credit aggregates
         # Add this line’s debit/credit to running balance for that day
-        snapshot.debit_balance += line.debit_amount or 0 # don’t try to add None
-        snapshot.credit_balance += line.credit_amount or 0
+        snapshot.debit_balance += line.debit_local or 0 # don’t try to add None
+        snapshot.credit_balance += line.credit_local or 0
         snapshot.save() # Save updated snapshot
 
 
