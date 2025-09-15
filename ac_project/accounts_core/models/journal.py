@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError  # Built-in way to raise vali
 from decimal import Decimal         # Used for exact decimal arithmetic (money values, accounting entries)
 from .entitymembership import Company, Currency
 from ..managers import TenantManager, JournalLineCurrencyManager
+from ..exceptions import UnbalancedJournalError
 from .period import Period
 from .account import Account
 
@@ -103,7 +104,10 @@ class JournalEntry(models.Model): # Represents one accounting transaction
             
             # Enforce double-entry rule: debits = credits
             if total_debit != total_credit:
-                raise ValidationError("Journal does not balance: debits != credits")
+                # Use custom exception
+                raise UnbalancedJournalError(
+                    f"Journal not balanced: debits={total_debit}, credits={total_credit}"
+                )
 
             # Journals are immutable once posted. Prevent double posting
             if self.status == "posted" :
