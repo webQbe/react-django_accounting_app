@@ -10,13 +10,21 @@ class JournalEntrySuccessTests(TestCase):
         self.usd = Currency.objects.create(code="USD", name="US Dollar")
         # setup company
         self.company = Company.objects.create(name="Test Co", default_currency= self.usd)
-        # setup account
-        self.account = Account.objects.create(
+        # setup debit account
+        self.cash = Account.objects.create(
             company=self.company,
-            code="1234", 
-            name="Fixed Assets",
+            code="1110", 
+            name="Cash on Hand",
             ac_type="Asset",
             normal_balance = "debit"
+        )
+        # setup credit account
+        self.revenue = Account.objects.create(
+            company=self.company,
+            code="4000", 
+            name="Operating Revenue",
+            ac_type="Income",
+            normal_balance = "credit"
         )
 
         # create JournalEntry
@@ -30,7 +38,7 @@ class JournalEntrySuccessTests(TestCase):
         JournalLine.objects.create(
                                    journal=self.je, 
                                    company=self.company,
-                                   account=self.account,
+                                   account=self.cash,
                                    currency=self.usd, 
                                    debit_original=100, 
                                    credit_original=0, 
@@ -38,7 +46,7 @@ class JournalEntrySuccessTests(TestCase):
         JournalLine.objects.create(
                                    journal=self.je, 
                                    company=self.company,
-                                   account=self.account,
+                                   account=self.revenue,
                                    currency=self.usd, 
                                    debit_original=0, 
                                    credit_original=100, 
@@ -101,10 +109,10 @@ class JournalEntryFailureTests(TestCase):
         # setup account
         self.account = Account.objects.create(
             company=self.company,
-            code="1234", 
-            name="Fixed Assets",
-            ac_type="Asset",
-            normal_balance = "debit"
+            code="4000", 
+            name="Operating Revenue",
+            ac_type="Income",
+            normal_balance = "credit"
         )
 
         # Create JournalEntry
