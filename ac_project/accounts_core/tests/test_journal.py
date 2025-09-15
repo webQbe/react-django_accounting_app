@@ -25,20 +25,28 @@ class JournalEntrySuccessTests(TestCase):
                                               date="2025-09-15", 
                                               status="draft"
                                             )
-
-    def test_balanced_entry_posts_successfully(self):
-
-        # Create Journal Lines: Debit 100, Credit 100
+        
+        # Arrange: create a balanced journal entry
         JournalLine.objects.create(
                                    journal=self.je, 
-                                   company=self.company, 
-                                   account=self.account, 
+                                   company=self.company,
+                                   account=self.account,
                                    currency=self.usd, 
                                    debit_original=100, 
-                                   credit_original=0
-                                   )
-        
-        JournalLine.objects.create(journal=self.je, company=self.company, account=self.account, currency=self.usd, debit_original=0, credit_original=100)
+                                   credit_original=0, 
+                                )
+        JournalLine.objects.create(
+                                   journal=self.je, 
+                                   company=self.company,
+                                   account=self.account,
+                                   currency=self.usd, 
+                                   debit_original=0, 
+                                   credit_original=100, 
+                                )
+
+
+    """ Test Balanced Entry """
+    def test_balanced_entry_posts_successfully(self):
 
         self.je.post() # Post JournalEntry
 
@@ -48,7 +56,39 @@ class JournalEntrySuccessTests(TestCase):
         self.assertEqual(self.je.status, "posted") 
        
         # check if at least one line has been marked `is_posted=True`
-        self.assertTrue(self.je.journalline_set.filter(is_posted=True).exists())
+        self.assertTrue(self.je.lines.filter(is_posted=True).exists())
+
+
+    """ Test for Idempotency 
+          1. You create a balanced journal entry.
+          2. Call .post() once → journal gets posted.
+          3. Call .post() again → nothing new should happen 
+           (no duplicate lines, no status change).
+    """
+    def test_post_is_idempotent_when_called_twice_with_same_data(self):
+
+        # First call → should post successfully
+        self.je.post()
+        self.je.refresh_from_db()
+        self.assertEqual(self.je.status, "posted")
+
+        # Save fingerprint + lines
+        first_fp = self.je.posting_fingerprint
+        first_lines = list(self.je.lines.values_list("id", "debit_original", "credit_original"))
+
+        # Second call → should be a no-op (idempotent)
+        self.je.post()
+        self.je.refresh_from_db()
+
+        second_fp = self.je.posting_fingerprint
+        second_lines = list(self.je.lines.values_list("id", "debit_original", "credit_original"))
+
+        # Assertions
+        self.assertEqual(first_fp, second_fp)  # same fingerprint
+        self.assertEqual(first_lines, second_lines)  # no extra lines created
+        self.assertEqual(self.je.status, "posted")  # still posted
+        self.assertEqual(self.je.lines.count(), 2)  # only 2 lines, no duplicates
+
 
 """ Failure tests """
 class JournalEntryFailureTests(TestCase):
@@ -67,8 +107,6 @@ class JournalEntryFailureTests(TestCase):
             normal_balance = "debit"
         )
 
-    def test_unbalanced_entry_cannot_be_posted(self):
-
         # Create JournalEntry
         self.je = JournalEntry.objects.create(
                     company=self.company, 
@@ -86,6 +124,9 @@ class JournalEntryFailureTests(TestCase):
                     credit_original=100
                 )
 
+    """ Test for Unbalanced Entry """
+    def test_unbalanced_entry_cannot_be_posted(self):
+        
         # Raise custom exception 
         with self.assertRaises(UnbalancedJournalError) as cm:
             self.je.post()

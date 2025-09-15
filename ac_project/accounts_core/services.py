@@ -180,7 +180,7 @@ def update_snapshots_for_journal(journal: JournalEntry):
     AccountBalanceSnapshot = apps.get_model("accounts_core", "AccountBalanceSnapshot")
 
     # Loop over each child JournalLine to update snapshot of corresponding account
-    for line in journal.journalline_set.all(): 
+    for line in journal.lines.all(): 
         # journal.journalline_set.all() works because Django automatically gives you 
         # the reverse relation manager from (journal: JournalEntry) → JournalLine
         snapshot, _ = AccountBalanceSnapshot.objects.get_or_create(
