@@ -1,6 +1,8 @@
+from django.apps import apps
+from django.utils import timezone
 from django.test import TestCase
-from accounts_core.models import Company, JournalEntry, JournalLine, Currency, Account, User
 from decimal import Decimal         # Used for exact decimal arithmetic (money values, accounting entries)
+from accounts_core.models import Company, JournalEntry, JournalLine, Currency, Account, User
 from ..exceptions import UnbalancedJournalError, AlreadyPostedDifferentPayload
 
 """ Success tests """
@@ -129,6 +131,29 @@ class JournalEntryFailureTests(TestCase):
 
         self.assertIn("Journal not balanced", str(cm.exception))
 
+
+    def test_post_atomicity_on_failure(self):
+        # Try posting → should raise UnbalancedJournalError
+        with self.assertRaises(UnbalancedJournalError):
+            self.je.post(user=self.user)
+
+        # Refresh from DB to observe post-call/rolled-back state
+        self.je.refresh_from_db()
+
+        """ Checks to confirm the entry was not transformed into a posted/immutable state. """
+        # 1) Ensure JE was not marked as posted
+        self.assertIn(getattr(self.je, "status", "draft"), ["draft"],
+                      msg="JournalEntry.status should remain 'draft' after failed post()")
+        
+        # 2) Ensure posted_at/posted_by/posting_fingerprint should not be set
+        self.assertIsNone(getattr(self.je, "posted_at", None))
+        self.assertIsNone(getattr(self.je, "posting_fingerprint", None))
+
+        # 3) Ensure journal lines were not partially removed/duplicated/changed
+        self.assertEqual(
+            JournalLine.objects.filter(journal=self.je).count(), 1,
+            msg="JournalLine count must remain 1 after failed post()"
+        )
 
    
     def test_post_raises_if_already_posted_and_data_changed(self):
