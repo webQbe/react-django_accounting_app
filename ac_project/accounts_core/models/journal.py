@@ -4,7 +4,7 @@ from django.db import models,  transaction   # ORM base classes to define databa
 from django.utils import timezone   
 from django.conf import settings    # To access global project settings
 from django.core.exceptions import ValidationError  # Built-in way to raise validation errors
-from decimal import Decimal         # Used for exact decimal arithmetic (money values, accounting entries)
+from decimal import Decimal, ROUND_HALF_UP     
 from .entitymembership import Company, Currency
 from ..managers import TenantManager, JournalLineCurrencyManager
 from ..exceptions import UnbalancedJournalError
@@ -422,9 +422,10 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
             - Local amounts are always stored, ready for reporting without recomputation.
             - If fx_rate or original amounts change, local fields are updated.
         """
-        rate = self.fx_rate or 1.0  # treat None as 1.0
-        self.debit_local = self.debit_original * rate
-        self.credit_local = self.credit_original * rate
+        rate = self.fx_rate or Decimal("1.0")  # treat None as 1.0
+        # round to 2 decimal places before assigning
+        self.debit_local = (self.debit_original * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        self.credit_local = (self.credit_original * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         # clean()+field validation always run whenever 
         # you save a JournalLine programmatically

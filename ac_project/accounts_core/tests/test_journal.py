@@ -1,6 +1,7 @@
 from django.test import TestCase
-from accounts_core.models import Company, JournalEntry, JournalLine, Currency, Account
-from ..exceptions import UnbalancedJournalError
+from accounts_core.models import Company, JournalEntry, JournalLine, Currency, Account, User
+from decimal import Decimal         # Used for exact decimal arithmetic (money values, accounting entries)
+from ..exceptions import UnbalancedJournalError, AlreadyPostedDifferentPayload
 
 """ Success tests """
 class JournalEntrySuccessTests(TestCase):
@@ -102,35 +103,22 @@ class JournalEntrySuccessTests(TestCase):
 class JournalEntryFailureTests(TestCase):
 
     def setUp(self):
-        # create a currency
         self.usd = Currency.objects.create(code="USD", name="US Dollar")
-        # setup company
         self.company = Company.objects.create(name="Test Co", default_currency= self.usd)
-        # setup account
-        self.account = Account.objects.create(
-            company=self.company,
-            code="4000", 
-            name="Operating Revenue",
-            ac_type="Income",
-            normal_balance = "credit"
-        )
-
-        # Create JournalEntry
-        self.je = JournalEntry.objects.create(
-                    company=self.company, 
-                    date="2025-09-15", 
-                    status="draft"
-                ) 
-        
-        # Create Journal Line: Credit 100
+        self.cash = Account.objects.create(company=self.company, code="1110", name="Cash on Hand", ac_type="Asset", normal_balance = "debit")
+        self.revenue = Account.objects.create(company=self.company, code="4000", name="Operating Revenue", ac_type="Income", normal_balance = "credit")
+        self.je = JournalEntry.objects.create(company=self.company, date="2025-09-15", status="draft")
+        self.user = User.objects.create()
+        # Create Debit entry
         JournalLine.objects.create(
-                    journal=self.je, 
-                    company=self.company, 
-                    account=self.account, 
-                    currency=self.usd, 
-                    debit_original=0, 
-                    credit_original=100
-                )
+                                    journal=self.je, 
+                                    company=self.company, 
+                                    account=self.cash, 
+                                    currency=self.usd, 
+                                    debit_original=100, 
+                                    credit_original=0
+                                )
+
 
     """ Test for Unbalanced Entry """
     def test_unbalanced_entry_cannot_be_posted(self):
@@ -140,3 +128,33 @@ class JournalEntryFailureTests(TestCase):
             self.je.post()
 
         self.assertIn("Journal not balanced", str(cm.exception))
+
+
+   
+    def test_post_raises_if_already_posted_and_data_changed(self):
+
+        """ Test if `AlreadyPostedDifferentPayload` is raised when 
+        a JournalEntry has already been posted and someone tries to 
+        change its data (lines, amounts, etc.) and post again  """
+
+        # Create Credit entry after Unbalanced Entry test
+        JournalLine.objects.create(journal=self.je, company=self.company, account=self.revenue, currency=self.usd, debit_original=0, credit_original=100)
+
+        # First post succeeds
+        self.je.post(user=self.user)
+
+        # Mutate data (simulate tampering after posting)
+        # Keep totals balanced
+        debitline = self.je.lines.first()
+        debitline.debit_original = Decimal("150.00") # Change debit line from 100 → 150
+        creditline = self.je.lines.last()
+        # Change credit line from 100 → 150
+        creditline.credit_original = Decimal("150.00") 
+        debitline.save()
+        creditline.save()
+
+        # Still Balanced: It won’t fail the balance check (since 100 = 100, or 150 = 150).
+        # But the payload is different than what was originally posted
+        # Second post should now raise
+        with self.assertRaises(AlreadyPostedDifferentPayload):
+            self.je.post(user=self.user)
