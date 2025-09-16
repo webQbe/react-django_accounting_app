@@ -2,8 +2,9 @@ from django.apps import apps
 from django.utils import timezone
 from django.test import TestCase
 from decimal import Decimal         # Used for exact decimal arithmetic (money values, accounting entries)
+from django.core.exceptions import ValidationError  # Built-in way to raise validation errors
 from accounts_core.models import Company, JournalEntry, JournalLine, Currency, Account, User
-from ..exceptions import UnbalancedJournalError, AlreadyPostedDifferentPayload
+from ..exceptions import UnbalancedJournalError, AlreadyPostedDifferentPayload, CompanyMismatchError
 
 """ Success tests """
 class JournalEntrySuccessTests(TestCase):
@@ -106,16 +107,20 @@ class JournalEntryFailureTests(TestCase):
 
     def setUp(self):
         self.usd = Currency.objects.create(code="USD", name="US Dollar")
-        self.company = Company.objects.create(name="Test Co", default_currency= self.usd)
-        self.cash = Account.objects.create(company=self.company, code="1110", name="Cash on Hand", ac_type="Asset", normal_balance = "debit")
-        self.revenue = Account.objects.create(company=self.company, code="4000", name="Operating Revenue", ac_type="Income", normal_balance = "credit")
-        self.je = JournalEntry.objects.create(company=self.company, date="2025-09-15", status="draft")
+       
+        # setup company 1
+        self.company1 = Company.objects.create(name="Test Co", default_currency=self.usd)
+        # setup debit account 1
+        self.cash_a = Account.objects.create(company=self.company1, code="1110", name="Cash on Hand", ac_type="Asset", normal_balance = "debit")
+       
+        self.revenue = Account.objects.create(company=self.company1, code="4000", name="Operating Revenue", ac_type="Income", normal_balance = "credit")
+        self.je = JournalEntry.objects.create(company=self.company1, date="2025-09-15", status="draft")
         self.user = User.objects.create()
         # Create Debit entry
         JournalLine.objects.create(
                                     journal=self.je, 
-                                    company=self.company, 
-                                    account=self.cash, 
+                                    company=self.company1, 
+                                    account=self.cash_a, 
                                     currency=self.usd, 
                                     debit_original=100, 
                                     credit_original=0
@@ -133,27 +138,64 @@ class JournalEntryFailureTests(TestCase):
 
 
     def test_post_atomicity_on_failure(self):
+
+        # capture starting JournalLine count
+        before = JournalLine.objects.filter(journal=self.je).count()
         # Try posting → should raise UnbalancedJournalError
         with self.assertRaises(UnbalancedJournalError):
             self.je.post(user=self.user)
-
         # Refresh from DB to observe post-call/rolled-back state
         self.je.refresh_from_db()
 
         """ Checks to confirm the entry was not transformed into a posted/immutable state. """
         # 1) Ensure JE was not marked as posted
-        self.assertIn(getattr(self.je, "status", "draft"), ["draft"],
-                      msg="JournalEntry.status should remain 'draft' after failed post()")
+        self.assertEqual(self.je.status, "draft", 
+                         "JournalEntry.status should remain 'draft'")
         
         # 2) Ensure posted_at/posted_by/posting_fingerprint should not be set
         self.assertIsNone(getattr(self.je, "posted_at", None))
         self.assertIsNone(getattr(self.je, "posting_fingerprint", None))
 
-        # 3) Ensure journal lines were not partially removed/duplicated/changed
-        self.assertEqual(
-            JournalLine.objects.filter(journal=self.je).count(), 1,
-            msg="JournalLine count must remain 1 after failed post()"
+        # 3) Assert JournalLine count is unchanged
+        after = JournalLine.objects.filter(journal=self.je).count()
+        self.assertEqual(after, before, 
+                            "JournalLine count should not change after failed post()")
+
+
+    def test_post_enforces_tenant_scope(self):
+
+        # setup company 2
+        self.company2 = Company.objects.create(name="Test Co 2", slug="test_co2", default_currency=self.usd)
+        
+        # setup debit account 2
+        self.cash_b = Account.objects.create(
+            company=self.company2,
+            code="2110", 
+            name="Cash B",
+            ac_type="Asset",
+            normal_balance = "debit"
         )
+
+        # Creating a JournalLine whose company differs from the JournalEntry's company
+        # should raise ValidationError immediately
+        with self.assertRaises(ValidationError):
+            # Invalid credit line (company2 mismatch!)
+            JournalLine.objects.create(
+                journal=self.je,
+                company=self.company2,  # Wrong company
+                account=self.cash_b,
+                currency=self.usd,
+                debit_original=0,
+                credit_original=100,
+            )
+
+        # Ensure journal was NOT marked as posted
+        self.je.refresh_from_db() # Refresh JE and assert posting did not happen and input lines unchanged
+        # original valid line from setUp should still be present
+        self.assertEqual(self.je.status, "draft")
+
+        # the original valid line from setUp should still be present
+        self.assertEqual(self.je.lines.count(), 1)
 
    
     def test_post_raises_if_already_posted_and_data_changed(self):
@@ -162,8 +204,8 @@ class JournalEntryFailureTests(TestCase):
         a JournalEntry has already been posted and someone tries to 
         change its data (lines, amounts, etc.) and post again  """
 
-        # Create Credit entry after Unbalanced Entry test
-        JournalLine.objects.create(journal=self.je, company=self.company, account=self.revenue, currency=self.usd, debit_original=0, credit_original=100)
+        # Create Credit entry for balancing
+        JournalLine.objects.create(journal=self.je, company=self.company1, account=self.revenue, currency=self.usd, debit_original=0, credit_original=100)
 
         # First post succeeds
         self.je.post(user=self.user)
