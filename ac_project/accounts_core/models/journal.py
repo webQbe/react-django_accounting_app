@@ -401,8 +401,43 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
                 raise ValidationError("fx_rate must be > 0 when currency differs")
         elif self.fx_rate not in (None, 1.0):
             raise ValidationError("fx_rate must be None or 1.0 for default currency")
-            
+        
+        # If there's a parent journal set, check DB for its posted flag.
+        if self.journal_id:
+            # Query DB for posted state (one small query)
+            posted = JournalEntry.objects.filter(pk=self.journal_id, status="posted").exists()
+            if posted:
+                # If this is an existing line being updated
+                if self.pk:
+                    # Compare persisted values to attempted values. 
+                    # If anything changed, forbid it.
+                    try:
+                        orig = JournalLine.objects.get(pk=self.pk)
+                    except JournalLine.DoesNotExist:
+                        # unlikely, but be safe
+                        raise ValidationError("Cannot modify JournalLine: parent JournalEntry is posted.")
+                    # decide which fields constitute a "modification" for your domain:
+                    changed = (
+                        orig.debit_original != self.debit_original
+                        or orig.credit_original != self.credit_original
+                        or orig.account_id != (self.account.id if self.account else None)
+                        or orig.invoice_id != (self.invoice.id if self.invoice else None)
+                        or orig.bill_id != (self.bill.id if self.bill else None)
+                    )
+                    if changed:
+                        raise ValidationError("Cannot modify JournalLine: parent JournalEntry is posted.")
+                else:
+                    # Trying to create a line on a posted journal — block it.
+                    raise ValidationError("Cannot add JournalLine: parent JournalEntry is posted.")
 
+    
+    def delete(self, *args, **kwargs):
+        # Prevent deletion if parent journal is posted
+        if self.journal_id:
+            if JournalEntry.objects.filter(pk=self.journal_id, status="posted").exists():
+                raise ValidationError("Cannot delete JournalLine: parent JournalEntry is posted.")
+        return super().delete(*args, **kwargs)
+      
     """ Treat fx_rate as 1.0 when it is NULL """
     @property
     def effective_fx_rate(self):
