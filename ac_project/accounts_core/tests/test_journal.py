@@ -1,10 +1,12 @@
 from django.apps import apps
+import datetime
 from django.utils import timezone
-from django.test import TestCase
-from decimal import Decimal         # Used for exact decimal arithmetic (money values, accounting entries)
+from django.test import TestCase, TransactionTestCase
+from decimal import Decimal, ROUND_HALF_UP     
 from django.core.exceptions import ValidationError  # Built-in way to raise validation errors
+from django.db.models.deletion import ProtectedError
 from accounts_core.models import Company, JournalEntry, JournalLine, Currency, Account, User
-from ..exceptions import UnbalancedJournalError, AlreadyPostedDifferentPayload, CompanyMismatchError
+from ..exceptions import UnbalancedJournalError, AlreadyPostedDifferentPayload
 
 """ Success tests """
 class JournalEntrySuccessTests(TestCase):
@@ -210,18 +212,81 @@ class JournalEntryFailureTests(TestCase):
         # First post succeeds
         self.je.post(user=self.user)
 
-        # Mutate data (simulate tampering after posting)
-        # Keep totals balanced
-        debitline = self.je.lines.first()
-        debitline.debit_original = Decimal("150.00") # Change debit line from 100 → 150
-        creditline = self.je.lines.last()
-        # Change credit line from 100 → 150
-        creditline.credit_original = Decimal("150.00") 
-        debitline.save()
-        creditline.save()
+         # Simulate external tampering: change persisted DB rows WITHOUT calling model.save()
+        debitline = self.je.lines.order_by('pk').first()
+        creditline = self.je.lines.order_by('pk').last()
 
-        # Still Balanced: It won’t fail the balance check (since 100 = 100, or 150 = 150).
-        # But the payload is different than what was originally posted
-        # Second post should now raise
+        # New values we want to simulate (still balanced)
+        new_debit = Decimal("150.00")
+        new_credit = Decimal("150.00")
+
+        
+        # perform DB-level update (bypass model validation)
+        JournalLine.objects.filter(pk=debitline.pk).update(
+            debit_original=new_debit,
+        )
+        JournalLine.objects.filter(pk=creditline.pk).update(
+            credit_original=new_credit,
+        )
+
+        # Clear any prefetched cache on the journal so post() reads fresh rows from DB
+        if hasattr(self.je, "_prefetched_objects_cache"):
+            self.je._prefetched_objects_cache.pop('lines', None)
+
+        # Now posting again should detect the persisted payload differs and raise
         with self.assertRaises(AlreadyPostedDifferentPayload):
             self.je.post(user=self.user)
+
+
+class JournalEntryFreezeTests(TestCase):
+    def setUp(self):
+        self.usd = Currency.objects.create(code="USD", name="US Dollar")
+        self.company = Company.objects.create(name="Test Co", default_currency=self.usd)
+
+        # create two accounts that balance
+        self.asset = Account.objects.create(
+            company=self.company, code="1000", name="Cash", ac_type="Asset", normal_balance="debit")
+        self.revenue = Account.objects.create(
+            company=self.company, code="4000", name="Revenue", ac_type="Income", normal_balance="credit")
+        
+
+
+    def make_balanced_entry(self):
+        je = JournalEntry.objects.create(company=self.company, date=datetime.date(2025, 9, 17), status="draft")
+        # create two lines that balance
+        JournalLine.objects.create(company=self.company, journal=je, account=self.asset, debit_original=100)
+        JournalLine.objects.create(company=self.company, journal=je, account=self.revenue, credit_original=100)
+        return je
+
+    def test_post_freezes_lines_on_update__raises_validationerror(self):
+        """Typical design: line.save() should raise ValidationError for posted entries."""
+        je = self.make_balanced_entry()
+        je.post()  # assume this marks entry posted and freezes lines
+        je.refresh_from_db()
+
+        # get fresh DB instances
+        line = je.lines.order_by('pk').first()
+        original_debit = line.debit_original
+
+        line.debit_original = original_debit + Decimal("50.00")
+
+        with self.assertRaises(ValidationError):
+            line.save()
+
+        # ensure DB value is unchanged (double-check)
+        line.refresh_from_db()
+        self.assertEqual(line.debit_original, original_debit)
+
+
+    def test_post_prevents_line_deletion(self):
+        """Deleting a posted line should be prevented (ProtectedError or ValidationError)."""
+        je = self.make_balanced_entry()
+        je.post()
+
+        line = je.lines.first()
+
+        # If you protect deletion at DB level, Django will raise ProtectedError
+        with self.assertRaises((ProtectedError, ValidationError)):
+            line.delete()
+
+        self.assertTrue(je.lines.filter(pk=line.pk).exists())
