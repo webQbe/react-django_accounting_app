@@ -46,8 +46,11 @@ class Item(models.Model): # Represents something a company sells & purchases
     # Current stock level of the item
     on_hand_quantity = models.DecimalField(  
                                         max_digits=14, decimal_places=4, # Allow precise tracking - supports large quantities with fractional amounts, e.g. liters.
-                                        default=Decimal("0.0")           # Default = 0
+                                        default=0  # Default = 0
                                     )
+    
+    # store standard prices per product
+    default_unit_price = models.DecimalField(max_digits=18, decimal_places=4, default=Decimal("0.00"))
 
     # Enforce tenant scoping
     objects = TenantManager() 
