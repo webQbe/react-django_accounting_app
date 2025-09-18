@@ -73,3 +73,12 @@ class JournalLineCurrencyManager(models.Manager):
             kwargs["currency"] = journal_entry.company.default_currency
         # call normal create()
         return super().create(journal_entry=journal_entry, **kwargs)
+    
+
+# Create an InvoiceLine, defaulting unit_price from Item if not given.
+class InvoiceLineUnitPriceManager(models.Manager):
+    def create_from_item(self, item, **kwargs):
+        if "unit_price" not in kwargs:
+            kwargs["unit_price"] = getattr(item, "default_unit_price", None)
+        kwargs["item"] = item
+        return super().create(**kwargs)
