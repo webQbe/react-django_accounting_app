@@ -9,7 +9,7 @@ from typing import Any, List, Dict
 # Import models
 from .models import (
     JournalEntry, JournalLine, BankTransaction, 
-    BankTransactionInvoice, Invoice, Bill, FixedAsset,
+    BankTransactionInvoice, BankTransactionBill, Invoice, Bill, FixedAsset,
     Period, Account
 )
 
@@ -33,7 +33,7 @@ def post_journal_entry(journal_entry_id, user=None):
 # ----------------------------
 # Payment-related workflows
 # ----------------------------
-def apply_payment(bt_id: int, invoice_id: int, amount: float):
+def apply_inv_payment(bt_id: int, invoice_id: int, amount: float):
     """
     Apply part (or all) of a bank transaction to an invoice.
     Locks both rows during the operation.
@@ -82,22 +82,62 @@ def apply_payment(bt_id: int, invoice_id: int, amount: float):
 
         return bt, inv
     
-def apply_bank_tx(bank_tx_id: int, invoice_applications: List[Dict]):
-    """
-    Apply one bank transaction across multiple invoices atomically.
-    Delegates each allocation to apply_payment().
-    """
+def apply_bank_tx_to_inv(bank_tx_id: int, invoice_applications: List[Dict]):
     with transaction.atomic():
         results = []
-        for ap in invoice_applications: # Loop over each application (list of dicts)
-            # Pull out invoice’s ID and amount to apply 
+        for ap in invoice_applications: 
             invoice_id = ap["invoice_id"]
             amount = ap["amount"]
-            # Call apply_payment() for each invoice
-            # Get updated BankTransaction and Invoice
-            bt, inv = apply_payment(bank_tx_id, invoice_id, amount)
-            # Add updated objects into results list
+            bt, inv = apply_inv_payment(bank_tx_id, invoice_id, amount)
             results.append((bt, inv))
+        return results
+
+def apply_bill_payment(bt_id: int, bill_id: int, amount: float):
+
+    with transaction.atomic():
+
+        bt = BankTransaction.objects.select_for_update().get(pk=bt_id)
+        bill = Bill.objects.select_for_update().get(pk=bill_id)
+
+        if amount > bill.outstanding_amount:
+            raise ValidationError("Payment exceeds bill outstanding amount")
+
+        total_applied = (
+            bt.banktransactionbill_set.aggregate(total=models.Sum("applied_amount"))["total"] or Decimal("0")
+        )
+
+        if total_applied + amount > bt.amount:
+            raise ValidationError("Applied amounts exceed bank transaction amount")
+
+        BankTransactionBill.objects.create( 
+            bank_transaction=bt,
+            bill=bill,
+            applied_amount=amount,
+            company=bt.company,  
+        )
+
+        bill.outstanding_amount -= amount
+        if bill.outstanding_amount <= 0:
+            bill.status = "paid"
+        bill.save(update_fields=["outstanding_amount", "status"])
+
+        total_applied += amount
+        if total_applied >= bt.amount:
+            bt.status = "fully_applied"
+        else:
+            bt.status = "partially_applied"
+        bt.save(update_fields=["status"])
+
+        return bt, bill
+    
+def apply_bank_tx_to_bill(bank_tx_id: int, bill_applications: List[Dict]):
+    with transaction.atomic():
+        results = []
+        for ap in bill_applications: 
+            bill_id = ap["bill_id"]
+            amount = ap["amount"]
+            bt, bill = apply_bill_payment(bank_tx_id, bill_id, amount)
+            results.append((bt, bill))
         return results
 
 
@@ -217,15 +257,33 @@ def pay_invoice(invoice: Invoice):
     invoice.transition_to("paid") 
     return invoice
 
+
+# ------------------------------------
+# Bill status update workflows
+# ------------------------------------
+"""Move bill from draft → posted (after validation)."""
+def post_bill(bill: Bill):
+    if not bill.lines.exists():
+        raise ValidationError("Cannot post bill with no lines")
+    bill.transition_to("posted") 
+    return bill
+
+"""Move bill from posted → paid (only when outstanding == 0)."""
+def pay_bill(bill: Bill):
+    if bill.outstanding != 0:
+        raise ValidationError("Cannot mark bill as paid until fully settled")
+    bill.transition_to("paid") 
+    return bill
+
 # ----------------------------------------
 # Bank Transaction status update workflows
 # ----------------------------------------
 
-""" Apply payment and transition statuses safely """
-def apply_and_update_status(bt_id, invoice_id, amount):
+""" Apply payment to invoice and update transition statuses safely """
+def pay_inv_and_update_status(bt_id, invoice_id, amount):
 
     with transaction.atomic():
-        bt, inv = apply_payment(bt_id, invoice_id, amount)
+        bt, inv = apply_inv_payment(bt_id, invoice_id, amount)
 
         """ update invoice status if needed """
         if inv.outstanding_amount == 0:
@@ -244,6 +302,30 @@ def apply_and_update_status(bt_id, invoice_id, amount):
             bt.transition_to("fully_applied")
 
         return bt, inv
+    
+""" Apply payment to bill and update transition statuses safely """
+def pay_bill_and_update_status(bt_id, bill_id, amount):
+
+    with transaction.atomic():
+        bt, bill = apply_bill_payment(bt_id, bill_id, amount)
+
+        """ update bill status if needed """
+        if bill.outstanding_amount == 0:
+            bill.transition_to("paid")
+        elif bill.status == "draft":
+            bill.transition_to("posted")
+
+        """  update bank transaction status """
+        # Call BankTransaction.applied_total() 
+        # to find how much of this transaction has been applied to bills
+        if bt.applied_total() == 0:
+            bt.transition_to("unapplied")
+        elif bt.applied_total() < bt.amount:
+            bt.transition_to("partially_applied")
+        else:
+            bt.transition_to("fully_applied")
+
+        return bt, bill
 
 
 # ------------------------------------

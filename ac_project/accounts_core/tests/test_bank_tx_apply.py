@@ -3,7 +3,7 @@ import datetime
 from django.test import TransactionTestCase
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from ..services import apply_bank_tx   
+from ..services import apply_bank_tx_to_inv   
 from ..models import (
     Company, Currency, BankAccount, BankTransaction,
     Invoice, BankTransactionInvoice 
@@ -61,7 +61,7 @@ class ApplyBankTxTests(TransactionTestCase):
 
         # Expect validation error (BankTransaction.clean() or apply_payment should detect over-apply)
         with self.assertRaises(ValidationError):
-            apply_bank_tx(self.bt.id, invoice_applications)
+            apply_bank_tx_to_inv(self.bt.id, invoice_applications)
 
         # Ensure no partial allocations were recorded
         self.assertEqual(
@@ -90,7 +90,7 @@ class ApplyBankTxTests(TransactionTestCase):
         # narrow to the actual exception your apply_payment raises 
         # (Invoice.DoesNotExist or ValidationError)
         with self.assertRaises(Exception): 
-            apply_bank_tx(self.bt.id, invoice_applications)
+            apply_bank_tx_to_inv(self.bt.id, invoice_applications)
 
         # Nothing persisted for this bank transaction
         self.assertEqual(

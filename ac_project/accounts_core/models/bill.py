@@ -129,6 +129,22 @@ class Bill(models.Model): # Header represents vendor bill (Accounts Payable docu
             raise ValidationError("Cannot delete a bill with applied payments.")
             # Void or credit an bill, instead of deleting it outright
         return super().delete(*args, **kwargs)
+    
+    def transition_to(self, new_status):
+        # Current state vs. allowed next states
+        allowed = {
+            "draft": ["posted"],
+            "posted": ["paid"],
+            "paid": []          # "paid" → (no further transitions)
+        }
+        # Look up what states are allowed from current self.status
+        if new_status not in allowed.get(self.status, []):
+            # If requested new_status isn’t allowed → block it
+            raise ValidationError(f"Cannot go from {self.status} to {new_status}")
+        
+        # If valid, update self.status and persist with .save()
+        self.status = new_status
+        self.save()
 
 class BillLine(models.Model): # Detail line represents individual items/services on the bill
    
