@@ -251,7 +251,7 @@ def open_invoice(invoice: Invoice):
 
 """Move invoice from open → paid (only when outstanding == 0)."""
 def pay_invoice(invoice: Invoice):
-    if invoice.outstanding != 0:
+    if invoice.outstanding_amount != 0:
         # Otherwise, you’d be marking unpaid invoices as paid.
         raise ValidationError("Cannot mark invoice as paid until fully settled")
     invoice.transition_to("paid") 
@@ -270,7 +270,7 @@ def post_bill(bill: Bill):
 
 """Move bill from posted → paid (only when outstanding == 0)."""
 def pay_bill(bill: Bill):
-    if bill.outstanding != 0:
+    if bill.outstanding_amount != 0:
         raise ValidationError("Cannot mark bill as paid until fully settled")
     bill.transition_to("paid") 
     return bill

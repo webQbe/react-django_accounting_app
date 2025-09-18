@@ -150,7 +150,7 @@ class BillLine(models.Model): # Detail line represents individual items/services
    
    # Belongs to both a company and its parent bill
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
-    bill = models.ForeignKey(Bill, on_delete=models.CASCADE)
+    bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name="lines")
 
     # Optionally linked to a predefined Item
     item = models.ForeignKey(
