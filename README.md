@@ -197,3 +197,54 @@ python manage.py runserver
 5. Add a Customer tied to that company.
 6. Try creating an Invoice — `clean()` and `save()` methods will enforce rules 
   *(e.g., no negative totals, no deleting invoices with payments, etc.).*
+
+
+## Database: Backup, Reset, and Migrations
+
+### Backup
+
+* **Development DB (SQLite / Postgres local):**
+
+  ```bash
+      # Postgres (local)
+      pg_dump -U <username> acdb > backup.sql
+
+      # If using Docker
+      docker exec -t ac-postgres pg_dump -U <username> acdb > backup.sql
+  ```
+
+### Resetting the Database
+
+Use this if you need a fresh start in development (⚠️ will delete all data).
+
+```bash
+# Drop all tables and recreate from migrations
+python manage.py flush     # resets data, keeps schema
+
+# OR drop the whole DB (Postgres example)
+dropdb acdb
+createdb acdb
+python manage.py migrate
+
+# If using Docker, reset the database with:
+docker exec -it ac-postgres dropdb -U <username> acdb
+docker exec -it ac-postgres createdb -U <username> acdb
+python manage.py migrate
+```
+
+### Applying Migrations
+
+```bash
+# Make new migrations after model changes
+python manage.py makemigrations
+
+# Apply migrations
+python manage.py migrate
+```
+
+### Rolling Back a Migration
+
+```bash
+# Migrate to a previous state (e.g., app_name to migration 0005)
+python manage.py migrate app_name 0005
+```
