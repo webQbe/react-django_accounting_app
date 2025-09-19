@@ -65,6 +65,7 @@ class BankTransaction(models.Model): # Represents single inflow/outflow in a ban
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default="bank_transfer")
     status = models.CharField(max_length=20, choices=BT_STATUS_CHOICES, default="unapplied") # other statuses: partially_applied, fully_applied
     reference = models.CharField(max_length=200, null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
     
     # Enforce tenant scoping
     objects = TenantManager() 
