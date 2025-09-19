@@ -1,7 +1,7 @@
 from django.db import models   # ORM base classes to define database tables as Python classes
 from django.core.exceptions import ValidationError  # Built-in way to raise validation errors
 from decimal import Decimal         # Used for exact decimal arithmetic (money values, accounting entries)
-from ..managers import TenantManager
+from ..managers import TenantManager, UnitPriceManager
 from .entitymembership import Company
 from .account import Account
 from .vendor import Vendor
@@ -176,6 +176,7 @@ class BillLine(models.Model): # Detail line represents individual items/services
     
     # Enforce tenant scoping
     objects = TenantManager() 
+    with_unit_price = UnitPriceManager() # autofill right unit_price
 
     class Meta:
         # For fast lookups of all lines on a given bill
