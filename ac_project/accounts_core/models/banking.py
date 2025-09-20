@@ -183,7 +183,7 @@ class BankTransactionBill(models.Model): # Bridge table for applying bank transa
                 ),
             # Ensure applied_amount is never negative                    
             models.CheckConstraint(
-                                    check=models.Q(applied_amount__gte=0),
+                                    condition=models.Q(applied_amount__gte=0),
                                     name="bt_bill_non_negative_amounts",
                                 ),
         ]

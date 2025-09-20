@@ -35,7 +35,7 @@ class AccountBalanceSnapshot(models.Model): # Summary / materialized snapshot us
             # Ensure balances are never negative 
             # unless your reporting intentionally allows negatives
             models.CheckConstraint(
-                check=(
+                condition=(
                     models.Q(debit_balance__gte=0) & 
                     models.Q(credit_balance__gte=0)
                 ),

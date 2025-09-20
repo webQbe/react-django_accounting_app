@@ -48,7 +48,8 @@ class Invoice(models.Model): # Represents a customer invoice
     total = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
     # Unpaid amount after payments are applied
     outstanding_amount = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0.00"))
-    
+    description = models.TextField(null=True, blank=True)
+
     # Enforce tenant scoping
     objects = TenantManager()  
 
@@ -200,7 +201,7 @@ class InvoiceLine(models.Model): # Each line describes a product/service sold on
         # Ensure quantity & unit_price are never negative
         constraints = [
             models.CheckConstraint(
-                check=models.Q(quantity__gte=0) & 
+                condition=models.Q(quantity__gte=0) & 
                       models.Q(unit_price__gte=0),
                 name="invl_non_negative_amounts",
             ),
@@ -275,7 +276,7 @@ class BankTransactionInvoice(models.Model): # Bridge table for applying bank tra
                                 ),
             # Ensure applied_amount is never negative                    
             models.CheckConstraint(
-                                    check=models.Q(applied_amount__gte=0),
+                                    condition=models.Q(applied_amount__gte=0),
                                     name="bt_inv_non_negative_amounts",
                                 ),
             ]

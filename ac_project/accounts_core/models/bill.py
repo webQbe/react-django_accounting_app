@@ -188,7 +188,7 @@ class BillLine(models.Model): # Detail line represents individual items/services
         # Ensure quantity & unit_price are never negative
         constraints = [
             models.CheckConstraint(
-                check=models.Q(quantity__gte=0) & 
+                condition=models.Q(quantity__gte=0) & 
                       models.Q(unit_price__gte=0),
                 name="bl_non_negative_amounts",
             ),

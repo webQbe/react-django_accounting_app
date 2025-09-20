@@ -320,23 +320,23 @@ class JournalLine(models.Model): # Stores Lines ( credits / debits )
             Django 3.2+ supports CheckConstraint. """
         constraints = [
             models.CheckConstraint(
-                check=(models.Q(debit_original__gte=0) & models.Q(credit_original__gte=0)), 
+                condition=(models.Q(debit_original__gte=0) & models.Q(credit_original__gte=0)), 
                 name="jl_non_negative_original_amounts"
             ),
             models.CheckConstraint(
-                check=(models.Q(debit_local__gte=0) & models.Q(credit_local__gte=0)), 
+                condition=(models.Q(debit_local__gte=0) & models.Q(credit_local__gte=0)), 
                 name="jl_non_negative_local_amounts"
             ),
             models.CheckConstraint(
-                check=~(models.Q(debit_original=0) & models.Q(credit_original=0)),
+                condition=~(models.Q(debit_original=0) & models.Q(credit_original=0)),
                 name="debit_xor_credit_nonzero_original"
             ),
             models.CheckConstraint(
-                check=~(models.Q(debit_local=0) & models.Q(credit_local=0)),
+                condition=~(models.Q(debit_local=0) & models.Q(credit_local=0)),
                 name="debit_xor_credit_nonzero_local"
             ),
             models.CheckConstraint(
-                check=models.Q(fx_rate__isnull=True) | models.Q(fx_rate__gt=0),
+                condition=models.Q(fx_rate__isnull=True) | models.Q(fx_rate__gt=0),
                 name="fx_rate_null_or_positive"
             ),
         ]
