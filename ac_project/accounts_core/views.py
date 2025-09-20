@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.shortcuts import get_object_or_404
 from django.http import JsonResponse
-from accounts_core.services import open_invoice, pay_invoice, apply_and_update_status
+from accounts_core.services import open_invoice, pay_invoice, pay_inv_and_update_status
 from .models import Invoice
 from django.core.exceptions import ValidationError
 from decimal import Decimal
@@ -25,7 +25,13 @@ def apply_payment_view(request, bt_id, invoice_id):
     amount = Decimal(request.POST.get("amount"))
     # call the service and handle response or errors
     try: 
-        bt, inv = apply_and_update_status(bt_id, invoice_id, amount)
+        bt, inv = pay_inv_and_update_status(bt_id, invoice_id, amount)
         return JsonResponse({"ok": True, "bt_status": bt.status, "invoice_status": inv.status})
     except ValidationError as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
+    
+def invoice_list(request):
+    # Call Invoice.TenantManager.for_company(), assume middleware has set request.company
+    # Get a lightweight dict with ids & descriptions, not full model instances.
+    invoices = Invoice.objects.for_company(request.company).values("id", "description")
+    return JsonResponse(list(invoices), safe=False) # `safe=False` returns a list instead of a dict

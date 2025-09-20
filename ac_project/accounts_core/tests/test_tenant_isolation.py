@@ -1,6 +1,11 @@
 from decimal import Decimal
 import datetime
 from django.test import TestCase
+from django.urls import reverse
+import pytest
+from django.test import RequestFactory
+import json
+from accounts_core.views import invoice_list
 from accounts_core.models import Company, Invoice, Currency
 
 class TenantIsolationManagerTests(TestCase):
@@ -38,3 +43,28 @@ class TenantIsolationManagerTests(TestCase):
         # `for_company` shouldn't return the other company's record
         with self.assertRaises(Invoice.DoesNotExist):
             Invoice.objects.for_company(self.company_a).get(pk=self.inv_b.pk)
+
+
+@pytest.mark.django_db
+def test_invoice_list_returns_only_tenant_data(client, django_user_model):
+        usd = Currency.objects.create(code="USD", name="US Dollar")
+        c1 = Company.objects.create(name="Company A", default_currency=usd, slug="com_a")
+        c2 = Company.objects.create(name="Company B", default_currency=usd, slug="com_b")
+        u1 = django_user_model.objects.create_user(username="alice", password="pw")
+
+        Invoice.objects.create(company=c1, description="C1 invoice", date=datetime.date.today(), total=Decimal("100.00"))
+        Invoice.objects.create(company=c2, description="C2 invoice", date=datetime.date.today(), total=Decimal("200.00"))
+
+        # Bypass client & call view with a RequestFactory
+        request = RequestFactory().get("/invoices/")
+        request.user = u1
+        # attach company to request before hitting view
+        request.company = c1  # manually simulate middleware
+        
+        # call the view directly
+        response = invoice_list(request)
+        data = json.loads(response.content)
+                          
+        descriptions = [d["description"] for d in data]
+        assert "C1 invoice" in descriptions     # available in c1 request
+        assert "C2 invoice" not in descriptions # not available in c2 request
