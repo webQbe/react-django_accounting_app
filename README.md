@@ -199,6 +199,19 @@ python manage.py runserver
   *(e.g., no negative totals, no deleting invoices with payments, etc.).*
 
 
+## Demo Data
+To populate the database with a demo company and user:
+
+```bash
+    python manage.py create_demo_tenant --company-name="Demo Ltd" --username=demo --password=demo123
+```
+
+This creates:
+- Company: Demo Ltd
+- User: demo / demo123
+- Sample accounts, invoices, journal entries, bank transactions
+
+
 ## Database: Backup, Reset, and Migrations
 
 ### Backup
