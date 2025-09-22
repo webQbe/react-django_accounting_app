@@ -3,12 +3,14 @@ from accounts_core.models import Bill, BillLine, Vendor
 from django.db.models import Prefetch
 from .mixins import TenantAdminMixin
 from .inlines import BillLineInline
+from .actions import mark_bill_as_posted, mark_bill_as_paid
 
 # Register `Bill` model
 @admin.register(Bill)
 class BillAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "bill_number", "vendor", "date", "due_date", "status", "total", "outstanding_amount")
     list_filter = ("company", "status", "date")
+    actions = [mark_bill_as_posted, mark_bill_as_paid]
     search_fields = ("bill_number", "vendor__name")
     inlines = [BillLineInline]
 
