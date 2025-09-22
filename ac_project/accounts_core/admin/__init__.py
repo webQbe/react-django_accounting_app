@@ -1,6 +1,6 @@
 from .mixins import TenantAdminMixin 
 from .inlines import JournalLineInline, InvoiceLineInline, BillLineInline, BankTransactionInvoiceInline, BankTransactionBillInline
-from .actions import post_journal_entries, mark_inv_as_open, mark_inv_as_paid, mark_inv_as_partially_applied, mark_inv_as_fully_applied
+from .actions import post_journal_entries, mark_inv_as_open, mark_inv_as_paid, mark_bill_as_paid, mark_bill_as_posted, mark_as_partially_applied, mark_as_fully_applied
 from .forms import UserAdminCreationForm, UserAdminChangeForm, InvoiceLineForm
 from .membership import CompanyAdmin, UserAdmin, EntityMembershipAdmin 
 from .account import AccountAdmin, AccountCategoryAdmin, AccountBalanceSnapshotAdmin 

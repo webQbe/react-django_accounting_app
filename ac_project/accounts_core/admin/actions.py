@@ -54,7 +54,7 @@ def mark_inv_as_paid(modeladmin, request, queryset):
 
 """ Add button/action that call bank transaction.transition_to("partially_applied") """
 @admin.action(description="Mark selected bank transactions as Partially applied")
-def mark_inv_as_partially_applied(modeladmin, request, queryset):
+def mark_as_partially_applied(modeladmin, request, queryset):
     for bt in queryset:
         try:
             bt.transition_to("partially_applied")
@@ -64,9 +64,29 @@ def mark_inv_as_partially_applied(modeladmin, request, queryset):
 
 """ call bank transaction.transition_to("fully_applied") """
 @admin.action(description="Mark selected bank transactions as Fully applied")
-def mark_inv_as_fully_applied(modeladmin, request, queryset):
+def mark_as_fully_applied(modeladmin, request, queryset):
     for bt in queryset:
         try:
             bt.transition_to("fully_applied")
         except ValidationError as e:
             modeladmin.message_user(request, f"{bt}: {e}", level=messages.ERROR)
+
+
+""" Add button/action that call bill.transition_to("posted") """
+@admin.action(description="Mark selected bills as Posted")
+def mark_bill_as_posted(modeladmin, request, queryset):
+    for bill in queryset:
+        try:
+            bill.transition_to("posted")
+        except ValidationError as e:
+            modeladmin.message_user(request, f"{bill}: {e}", level=messages.ERROR)
+
+""" call bill.transition_to("paid") """
+@admin.action(description="Mark selected bills as Paid")
+def mark_bill_as_paid(modeladmin, request, queryset):
+    for bill in queryset:
+        try:
+            bill.transition_to("paid")
+        except ValidationError as e:
+            modeladmin.message_user(request, f"{bill}: {e}", level=messages.ERROR)
+

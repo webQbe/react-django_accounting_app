@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from accounts_core.models import BankAccount, BankTransaction, BankTransactionInvoice, BankTransactionBill, Currency
 from .mixins import TenantAdminMixin
-from .actions import mark_inv_as_partially_applied, mark_inv_as_fully_applied
+from .actions import mark_as_partially_applied, mark_as_fully_applied
 from .inlines import BankTransactionInvoiceInline, BankTransactionBillInline
 
 # Register `BankAccount` model
@@ -20,7 +20,7 @@ class BankAccountAdmin(TenantAdminMixin, admin.ModelAdmin):
 class BankTransactionAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "bank_account", "payment_date", "amount", "payment_method", "reference", "status")
     list_filter = ("company", "bank_account", "payment_method", "payment_date", "status")
-    actions = [mark_inv_as_partially_applied, mark_inv_as_fully_applied]
+    actions = [mark_as_partially_applied, mark_as_fully_applied]
     inlines = [BankTransactionInvoiceInline, BankTransactionBillInline]
 
     # Fetch everything in one SQL join
