@@ -11,10 +11,79 @@ from django.contrib.auth.forms import UserCreationForm as DjangoUserCreationForm
 from django.db.models import Prefetch
 from django.core.exceptions import ValidationError 
 
+# ---------- Base Admin Mixin ----------
+class TenantAdminMixin:
+    """
+        Enforce tenant isolation in Django admin.
+        Uses request.company (set by your CurrentCompanyMiddleware) or falls back to request.user.company.
+    """
+    def _get_request_company(self, request):
+        # prefer request.company (middleware) 
+        # but fallback to request.user.company if present
+        company = getattr(request, "company", None)
+        if company is None:
+            user = getattr(request, "user", None)
+            if user and hasattr(user, "company"):
+                company = getattr(user, "company")
+        return company
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if qs is None: # if super returned None, return an empty queryset instead
+            from django.apps import apps
+            return apps.get_model(self.model._meta.app_label, self.model._meta.model_name).objects.none()
+
+        company = self._get_request_company(request)
+
+        # If superuser, show everything; 
+        # otherwise restrict to company if available
+        if request.user.is_superuser:
+            return qs
+        if company is None:
+            # If no company available in request, return none
+            return qs.none()
+        return qs.filter(company=company)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        """
+        Restrict foreignkey dropdowns to the current company where appropriate.
+        Example: company field, account field, customer/vendor field that are company-scoped.
+        """
+        company = self._get_request_company(request)
+
+        # If FK is to Company and user is not superuser, 
+        # restrict to user's company
+        if db_field.name == "company" and not request.user.is_superuser:
+            if company is not None:
+                kwargs["queryset"] = db_field.related_model.objects.filter(pk=company.pk)
+            else:
+                kwargs["queryset"] = db_field.related_model.objects.none()
+            return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+        # if related model has a `company` field, 
+        # restrict it to request's company
+        rel_model = getattr(db_field, "related_model", None)
+        if rel_model is not None and hasattr(rel_model, "company") and not request.user.is_superuser:
+            if company is not None:
+                kwargs["queryset"] = rel_model.objects.filter(company=company)
+            else:
+                kwargs["queryset"] = rel_model.objects.none()
+
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        # Ensure object is always owned by company on save (unless superuser)
+        if not request.user.is_superuser:
+            company = self._get_request_company(request)
+            if company is not None:
+                obj.company = company
+        super().save_model(request, obj, form, change)
+
+
 
 # ---------- Helpful inline admin classes ----------
 
-class JournalLineInline(admin.TabularInline): # admin.TabularInline: shows related objects in table format (rows under parent form) 
+class JournalLineInline(TenantAdminMixin, admin.TabularInline): # admin.TabularInline: shows related objects in table format (rows under parent form) 
     """ Show JournalLine rows on JournalEntry page """
     model = models.JournalLine 
     extra = 0  # don’t show “empty” rows by default (prevents clutter)
@@ -23,6 +92,11 @@ class JournalLineInline(admin.TabularInline): # admin.TabularInline: shows relat
     readonly_fields = ("is_posted",) # fields that can be seen but not edited, always read-only → protects audit trail
     show_change_link = True          # each row has a link to full detail page
     ordering = ("id",)               # lines appear in creation order
+
+    # Restrict company FK in dropdown 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("account", "invoice", "bill", "bank_transaction", "fixed_asset")
 
     def get_readonly_fields(self, request, obj=None):
         # Once journal is `posted`, all its lines become completely locked
@@ -42,7 +116,7 @@ class InvoiceLineForm(forms.ModelForm):
         return super().clean()
 
 
-class InvoiceLineInline(admin.TabularInline):
+class InvoiceLineInline(TenantAdminMixin, admin.TabularInline):
     """ Shows invoice lines under an Invoice page """
     model = models.InvoiceLine
     form = InvoiceLineForm
@@ -52,29 +126,51 @@ class InvoiceLineInline(admin.TabularInline):
     readonly_fields = ("line_total",) # `line_total` is computed automatically, so it’s read-only
     show_change_link = True
 
+    # Restrict company FK in dropdown 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("item", "account")
 
-class BillLineInline(admin.TabularInline):
+
+class BillLineInline(TenantAdminMixin, admin.TabularInline):
     """ Shows bill lines under a Bill page """
     model = models.BillLine
     extra = 0
-    fields = ("description", "quantity", "unit_price", "line_total", "account")
+    fields = ("item", "description", "quantity", "unit_price", "line_total", "account")
     readonly_fields = ("line_total",) # not editable
     show_change_link = True
 
+    # Restrict company FK in dropdown 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("item", "account")
 
-class BankTransactionInvoiceInline(admin.TabularInline):
+
+class BankTransactionInvoiceInline(TenantAdminMixin, admin.TabularInline):
     """ Let staff apply a bank transaction against one or more invoices. 
         Each row says: “this much from this transaction applies to that invoice.”"""
     model = models.BankTransactionInvoice
     extra = 0
-    fields = ("invoice", "applied_amount")
+    fields = ("invoice", "bank_transaction","applied_amount")
 
-class BankTransactionBillInline(admin.TabularInline):
+    # Restrict company FK in dropdown 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("invoice", "account", "bank_transaction")
+
+    
+
+class BankTransactionBillInline(TenantAdminMixin, admin.TabularInline):
     """ Let staff apply a bank transaction against one or more bills. 
         Each row says: “this much from this transaction applies to that bill.”"""
     model = models.BankTransactionBill
     extra = 0
-    fields = ("bill", "applied_amount")
+    fields = ("bill", "bank_transaction", "applied_amount")
+
+    # Restrict company FK in dropdown 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("bill", "account", "bank_transaction")
 
 
 # ---------- Admin actions ----------
@@ -93,8 +189,7 @@ def post_journal_entries(modeladmin, # `ModelAdmin` class for JournalEntry
              # Wrap each posting in a DB transaction
             with transaction.atomic():     # Ensure either all steps succeed or DB rolls back
                 # Call `post()` on `JournalEntry` model
-                # Pass `request.user`to record who posted it
-                je.transition_to("posted", user=request.user)
+                je.transition_to("posted", user=request.user) # Pass `request.user`to record who posted it
             success += 1                   # If no error → increment success counter
         except Exception as exc:  # Catch exception: ValidationError, etc.
             # Show error message in Django admin interface
@@ -109,7 +204,7 @@ def post_journal_entries(modeladmin, # `ModelAdmin` class for JournalEntry
 
 """ Add button/action that call invoice.transition_to("open") """
 @admin.action(description="Mark selected invoices as Open")
-def mark_as_open(modeladmin, request, queryset):
+def mark_inv_as_open(modeladmin, request, queryset):
     for inv in queryset:
         try:
             inv.transition_to("open")
@@ -119,7 +214,7 @@ def mark_as_open(modeladmin, request, queryset):
 
 """ call invoice.transition_to("paid") """
 @admin.action(description="Mark selected invoices as Paid")
-def mark_as_paid(modeladmin, request, queryset):
+def mark_inv_as_paid(modeladmin, request, queryset):
     for inv in queryset:
         try:
             inv.transition_to("paid")
@@ -128,7 +223,7 @@ def mark_as_paid(modeladmin, request, queryset):
 
 """ Add button/action that call bank transaction.transition_to("partially_applied") """
 @admin.action(description="Mark selected bank transactions as Partially applied")
-def mark_as_partially_applied(modeladmin, request, queryset):
+def mark_inv_as_partially_applied(modeladmin, request, queryset):
     for bt in queryset:
         try:
             bt.transition_to("partially_applied")
@@ -138,7 +233,7 @@ def mark_as_partially_applied(modeladmin, request, queryset):
 
 """ call bank transaction.transition_to("fully_applied") """
 @admin.action(description="Mark selected bank transactions as Fully applied")
-def mark_as_fully_applied(modeladmin, request, queryset):
+def mark_inv_as_fully_applied(modeladmin, request, queryset):
     for bt in queryset:
         try:
             bt.transition_to("fully_applied")
@@ -156,23 +251,27 @@ class CompanyAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug") # enable search by name and slug
     ordering = ("name",)             # sort companies alphabetically by default
 
-    # Fetch all memberships and their users in bulk
     def get_queryset(self, request):
         qs = super().get_queryset(request)
+        # Fetch all memberships and their users in bulk
         return qs.prefetch_related("memberships__user")
         """ Django “stitches” memberships and users back onto each company """
 
 # Register `AccountCategory` model 
 @admin.register(models.AccountCategory)
-class AccountCategoryAdmin(admin.ModelAdmin):
+class AccountCategoryAdmin(TenantAdminMixin, admin.ModelAdmin):
     """ admin users can quickly see categories per company """
     list_display = ("id", "name", "company")
     list_filter = ("company",) # Add sidebar filter 
     search_fields = ("name",)
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs
+
 # Register `Account` model 
 @admin.register(models.Account)
-class AccountAdmin(admin.ModelAdmin):
+class AccountAdmin(TenantAdminMixin, admin.ModelAdmin):
     # show key accounting fields
     list_display = ("id", "company", "code", "name", "ac_type", "normal_balance", "is_active")
     list_filter = ("company", "ac_type", "is_active")
@@ -184,37 +283,23 @@ class AccountAdmin(admin.ModelAdmin):
     )
     # Tenant Filtering
     def get_queryset(self, request):
-        #  Call parent `ModelAdmin` to get default queryset for this model in admin
-        qs = super().get_queryset(request) 
-        # Look for `.company` attribute on logged-in user 
-        company = getattr(request.user, "company", None) # comes from middleware or user model 
-        if company:
-            # limit the qs to only rows belonging to that company
-            return qs.filter(company=company)
-        return qs # If no company is set, fall back to unfiltered qs
-
-    # Control what choices appear in for FK dropdown in admin form
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        # Only apply this special filtering to `parent` field of `Account` model 
-        if db_field.name == "parent": 
-            # Check which company logged-in user belongs to (as set by your middleware / user model)
-            company = getattr(request.user, "company", None) 
-            if company: # If company is set for `parent` account, 
-                # restrict dropdown choices only to accounts in the same company
-                kwargs["queryset"] = models.Account.objects.filter(company=company)
-        # Finally, call default implementation, but with our filtered queryset applied
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+        qs = super().get_queryset(request) # TenantAdminMixin applies isolation
+        return qs 
 
 # Register `Period` model 
 @admin.register(models.Period)
-class PeriodAdmin(admin.ModelAdmin):
+class PeriodAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "name", "start_date", "end_date", "is_closed")
     list_filter = ("company", "is_closed")
     search_fields = ("name",)
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs
+
 # Register `Customer` model 
 @admin.register(models.Customer)
-class CustomerAdmin(admin.ModelAdmin):
+class CustomerAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "name", "contact_email", "payment_terms_days", "default_ar_account")
     search_fields = ("name", "contact_email")
     list_filter = ("company",)
@@ -229,7 +314,7 @@ class CustomerAdmin(admin.ModelAdmin):
 
 # Register `Vendor` model 
 @admin.register(models.Vendor)
-class VendorAdmin(admin.ModelAdmin):
+class VendorAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "name", "contact_email", "payment_terms_days", "default_ap_account")
     search_fields = ("name",)
     list_filter = ("company",)
@@ -241,14 +326,18 @@ class VendorAdmin(admin.ModelAdmin):
 
 # Register `Item` model 
 @admin.register(models.Item)
-class ItemAdmin(admin.ModelAdmin):
+class ItemAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "sku", "name", "on_hand_quantity")
     search_fields = ("sku", "name")
     list_filter = ("company",)
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs
+
 # Register `JournalEntry` model 
 @admin.register(models.JournalEntry)
-class JournalEntryAdmin(admin.ModelAdmin):
+class JournalEntryAdmin(TenantAdminMixin, admin.ModelAdmin):
     """ Basic admin display setup """
     list_display = ("id", "company", "date", "reference", "status", "posted_at", "created_by", "balanced")
     list_filter = ("company", "status", "date")
@@ -297,22 +386,27 @@ class JournalEntryAdmin(admin.ModelAdmin):
         if obj and obj.status == "posted" and not request.user.is_superuser:
             return False
         return super().has_change_permission(request, obj)
-        # Only superusers can still change them (like an override for emergencies)
+        # Only AccountAdminsuperusers can still change them (like an override for emergencies)
 
 # Register `JournalLine` model 
 @admin.register(models.JournalLine)
-class JournalLineAdmin(admin.ModelAdmin):
+class JournalLineAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "journal", "account", "debit_original", "credit_original", "debit_local", "credit_local", "is_posted")
     list_filter = ("company", "account")
     search_fields = ("description",)
     readonly_fields = ("is_posted",)
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs
+    
+
 # Register `Invoice` model 
 @admin.register(models.Invoice)
-class InvoiceAdmin(admin.ModelAdmin):
+class InvoiceAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "invoice_number", "customer", "date", "due_date", "status", "total", "outstanding_amount")
     list_filter = ("company", "status", "date")
-    actions = [mark_as_open, mark_as_paid]
+    actions = [mark_inv_as_open, mark_inv_as_paid]
     search_fields = ("invoice_number", "customer__name")
     inlines = [InvoiceLineInline]
 
@@ -323,18 +417,21 @@ class InvoiceAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         # queryset of invoices admin page will display - Invoice.objects.all()
         qs = super().get_queryset(request) 
+        # ensure qs is a QuerySet
+        if qs is None:
+            return models.Invoice.objects.none()
         # Fetch invoice lines, also fetch their related Item & Account
         invoice_lines_qs = models.InvoiceLine.objects.select_related("item", "account")
         # Use a SQL join so it fetches company & customer in the same query as Invoice
-        return qs.select_related("company", "customer").prefetch_related(
+        qs = qs.select_related("company", "customer").prefetch_related(
             # Prefetch invoice lines
             # so we can loop over invoice.prefetched_lines without extra queries
             Prefetch("lines", # reverse relation from Invoice → InvoiceLine (because of related_name="lines")
                      queryset=invoice_lines_qs, 
                      # store prefetched results into invoice.prefetched_lines
                      to_attr="prefetched_lines" 
-                    )
-            )
+                    ))
+        return qs
     
     """ Enforce immutability at admin level """
     def get_readonly_fields(self, request, obj=None):
@@ -354,7 +451,7 @@ class InvoiceAdmin(admin.ModelAdmin):
 
 # Register `InvoiceLine` model
 @admin.register(models.InvoiceLine)
-class InvoiceLineAdmin(admin.ModelAdmin):
+class InvoiceLineAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "invoice", "item", "line_total", "account")
     list_filter = ("company",)
     search_fields = ("description",)
@@ -366,21 +463,28 @@ class InvoiceLineAdmin(admin.ModelAdmin):
 
 # Register `Bill` model
 @admin.register(models.Bill)
-class BillAdmin(admin.ModelAdmin):
+class BillAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "bill_number", "vendor", "date", "due_date", "status", "total", "outstanding_amount")
     list_filter = ("company", "status", "date")
     search_fields = ("bill_number", "vendor__name")
     inlines = [BillLineInline]
 
-    # Fetch everything in one SQL join
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related("company", "vendor").prefetch_related(
-            "billline_set__item",
-            "billline_set__account"
-        )
-        """ For each Bill, prefetch all its BillLines, and 
-            within those lines also prefetch their linked Item & Account objects."""
+        if qs is None:
+            return models.Bill.objects.none()
+        # Fetch everything in one SQL join
+        bill_lines_qs = models.BillLine.objects.select_related("item", "account")
+        qs = qs.select_related("company", "vendor").prefetch_related(
+            # Prefetch bill lines
+            # so we can loop over bill.prefetched_lines without extra queries
+            Prefetch("lines", # reverse relation from Bill → BillLine (because of related_name="lines")
+                     queryset=bill_lines_qs, 
+                     # store prefetched results into bill.prefetched_lines
+                     to_attr="prefetched_lines" 
+                    )
+            )
+        return qs
         
     """ Enforce immutability at admin level """
     def get_readonly_fields(self, request, obj=None):
@@ -400,7 +504,7 @@ class BillAdmin(admin.ModelAdmin):
 
 # Register `BillLine` model
 @admin.register(models.BillLine)
-class BillLineAdmin(admin.ModelAdmin):
+class BillLineAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "bill", "item", "line_total", "account")
     search_fields = ("description",)
 
@@ -411,16 +515,20 @@ class BillLineAdmin(admin.ModelAdmin):
 
 # Register `BankAccount` model
 @admin.register(models.BankAccount)
-class BankAccountAdmin(admin.ModelAdmin):
+class BankAccountAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "name", "account_number_masked", "currency_code", "last_reconciled_at")
     list_filter = ("company",)
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs
+
 # Register `BankTransaction` model
 @admin.register(models.BankTransaction)
-class BankTransactionAdmin(admin.ModelAdmin):
+class BankTransactionAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "bank_account", "payment_date", "amount", "payment_method", "reference", "status")
     list_filter = ("company", "bank_account", "payment_method", "payment_date", "status")
-    actions = [mark_as_partially_applied, mark_as_fully_applied]
+    actions = [mark_inv_as_partially_applied, mark_inv_as_fully_applied]
     inlines = [BankTransactionInvoiceInline, BankTransactionBillInline]
 
     # Fetch everything in one SQL join
@@ -437,7 +545,7 @@ class BankTransactionAdmin(admin.ModelAdmin):
 
 # Register `BankTransactionInvoice` model
 @admin.register(models.BankTransactionInvoice)
-class BankTransactionInvoiceAdmin(admin.ModelAdmin):
+class BankTransactionInvoiceAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "bank_transaction", "invoice", "applied_amount")
     list_filter = ("company", "bank_transaction")
     search_fields = ("invoice__invoice_number",)
@@ -449,7 +557,7 @@ class BankTransactionInvoiceAdmin(admin.ModelAdmin):
 
 # Register `BankTransactionBill` model
 @admin.register(models.BankTransactionBill)
-class BankTransactionBillAdmin(admin.ModelAdmin):
+class BankTransactionBillAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "bank_transaction", "bill", "applied_amount")
     list_filter = ("company", "bank_transaction")
     search_fields = ("bill__bill_number",)
@@ -461,14 +569,18 @@ class BankTransactionBillAdmin(admin.ModelAdmin):
 
 # Register `FixedAsset` model
 @admin.register(models.FixedAsset)
-class FixedAssetAdmin(admin.ModelAdmin):
+class FixedAssetAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "asset_code", "description", "purchase_date", "purchase_cost", "useful_life_years", "depreciation_method")
     list_filter = ("company", "depreciation_method")
     search_fields = ("asset_code", "description")
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs
+
 # Register `AccountBalanceSnapshot` model
 @admin.register(models.AccountBalanceSnapshot)
-class AccountBalanceSnapshotAdmin(admin.ModelAdmin):
+class AccountBalanceSnapshotAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "account", "snapshot_date", "debit_balance", "credit_balance")
     list_filter = ("company", "snapshot_date")
 
@@ -479,7 +591,7 @@ class AccountBalanceSnapshotAdmin(admin.ModelAdmin):
 
 # Register `AuditLog` model
 @admin.register(models.AuditLog)
-class AuditLogAdmin(admin.ModelAdmin):
+class AuditLogAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("id", "company", "user", "action", "object_type", "object_id", "created_at")
     search_fields = ("object_type", "object_id", "user__username")
     list_filter = ("company", "action", "created_at")
@@ -491,7 +603,7 @@ class AuditLogAdmin(admin.ModelAdmin):
 
 # Register `Currency` model
 @admin.register(models.Currency)
-class CurrencyAdmin(admin.ModelAdmin):
+class CurrencyAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ("code", "name", "symbol", "decimal_places")
     search_fields = ("code", "name")
     ordering = ("code",)
@@ -502,7 +614,7 @@ class CurrencyAdmin(admin.ModelAdmin):
 
 # Register EntityMembership model
 @admin.register(models.EntityMembership)
-class EntityMembershipAdmin(admin.ModelAdmin):
+class EntityMembershipAdmin(TenantAdminMixin, admin.ModelAdmin):
     # Show memberships
     list_display = ("user", "company", "role", "is_active", "created_at")
     list_filter = ("role", "is_active", "company")
@@ -510,39 +622,36 @@ class EntityMembershipAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at",) # prevent tampering with creation date
     ordering = ("company__name", "user__username")
 
-    # Fetch everything in one SQL join
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.select_related("company", "user")
-
     # Scope querysets by company
     # prevents someone from snooping into memberships of other companies
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if request.user.is_superuser:   
-            # Superusers see all memberships
+        # Fetch everything in one SQL join
+        qs = qs.select_related("company", "user")
+        if request.user.is_superuser:  # Superusers see all memberships
             return qs                   
         # Non-superusers only see memberships of their companies 
         allowed_company_ids = request.user.memberships.values_list("company_id", flat=True)
         return qs.filter(company_id__in=allowed_company_ids)
 
-    # Prevent “sneaking in” a membership for some unrelated company
-    # Restrict available choices for company FK
-    def formfield_for_foreignkey(self, db_field, request=None, **kwargs):
-        """
-        Limit company or user choices when creating a membership in the admin:
-        - non-superusers can only pick companies they belong to
-        - optionally, limit user choices (so they can only add users that are co-members or invite new ones).
-        """
-        field = super().formfield_for_foreignkey(db_field, request, **kwargs)
-        if not request or request.user.is_superuser:
-            return field
+    """    # Prevent “sneaking in” a membership for some unrelated company
+        # Restrict available choices for company FK
+        def formfield_for_foreignkey(self, db_field, request=None, **kwargs):
+            
+            Limit company or user choices when creating a membership in the admin:
+            - non-superusers can only pick companies they belong to
+            - optionally, limit user choices (so they can only add users that are co-members or invite new ones).
+            
+            field = super().formfield_for_foreignkey(db_field, request, **kwargs)
+            if not request or request.user.is_superuser:
+                return field
 
-        if db_field.name == "company":
-            allowed_company_ids = request.user.memberships.values_list("company_id", flat=True)
-            # staff user can only assign a membership to their companies
-            field.queryset = models.Company.objects.filter(id__in=allowed_company_ids)
-        return field
+            if db_field.name == "company":
+                allowed_company_ids = request.user.memberships.values_list("company_id", flat=True)
+                # staff user can only assign a membership to their companies
+                field.queryset = models.Company.objects.filter(id__in=allowed_company_ids)
+            return field 
+    """
 
     # Permission checks
     # To modify memberships 
