@@ -168,9 +168,34 @@ class Command(BaseCommand):
         self.customer = Customer.objects.create(company=company, name=c_name)
         self.stdout.write(self.style.SUCCESS(f"Created customer: {self.customer}"))
 
+        # Generate unique invoice number
+        def unique_inv_no(c_name, max_tries=100):
+
+            base = c_name[:3] + "-00"
+            inv_no = base
+            i = 1
+
+            if not Invoice.objects.filter(invoice_number=inv_no).exists():
+                return inv_no
+
+            while Invoice.objects.filter(invoice_number=inv_no).exists():
+                inv_no = f"{base}-00{i}"  # Example: "tes-00" → "tes-001" → "tes-002"
+
+                if not Invoice.objects.filter(invoice_number=inv_no).exists():
+                    return inv_no
+
+                i += 1
+                if i > max_tries:
+                    raise RuntimeError(
+                        f"Couldn't generate unique number for base={base} after {max_tries} tries"
+                    )
+            return inv_no
+
+        # Create Invoice for the customer
+        inv_no = unique_inv_no(c_name)
         invoice = Invoice.objects.create(
             company=company,
-            invoice_number="INV-001",
+            invoice_number=inv_no,
             date=datetime.date.today(),
             total=Decimal("1000.00"),
             customer=self.customer,
