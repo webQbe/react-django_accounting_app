@@ -130,7 +130,44 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Created accounts (Cash, Revenue)"))
 
         # 4. Create sample invoice
-        self.customer = Customer.objects.create(company=company, name="Test Customer")
+        # Generate unique name for customer
+        def unique_customer_for_company(name, max_tries=100):
+            """
+            Return a name that is not yet used for a Customer.
+            Starts with the exact `name`. If taken, tries name_customer-1, -2, ...
+            """
+
+            base = name or "company"
+            # Initialize c_name and i
+            c_name = base
+            i = 1
+
+            # quick early-return if name is free
+            if not Customer.objects.filter(name=c_name).exists():
+                return c_name
+
+            # otherwise iterate and find a free variation
+            while Customer.objects.filter(name=name).exists():
+
+                c_name = f"{base[:4]} cus-{i}"  # Example: "Test cus-1" → "Test cus-2" → "Test cus-3"
+
+                if not Customer.objects.filter(name=c_name).exists():
+                    return c_name
+
+                i += 1  # Move to next number if name is still not unique
+                if (
+                    i > max_tries
+                ):  # if we try 100 times and still can’t find a free name
+                    raise RuntimeError(
+                        f"Couldn't generate unique name for base={base} after {max_tries} tries"
+                    )  # bail out with an error
+            return c_name
+
+        # Create customer for invoice
+        c_name = unique_customer_for_company(company_name)
+        self.customer = Customer.objects.create(company=company, name=c_name)
+        self.stdout.write(self.style.SUCCESS(f"Created customer: {self.customer}"))
+
         invoice = Invoice.objects.create(
             company=company,
             invoice_number="INV-001",
