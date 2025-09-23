@@ -234,7 +234,20 @@ class Command(BaseCommand):
 
         # 6. Create bank transaction
 
-        self.bank_account = BankAccount.objects.create(company=company, name="Bank A")
+        # Generate unique name for bank account
+        def unique_name_for_bac(name, max_tries=100):
+            bac_name = name + "_BankAC"
+            i = 1
+            while BankAccount.objects.filter(name=bac_name).exists():
+                bac_name = f"{bac_name}-{i}"  # Example: "test-ltd_BankAC" → "test-ltd_BankAC-1" → "test-ltd_BankAC-2"
+                i += 1
+                if i > max_tries:
+                    raise RuntimeError("Couldn't generate unique bank account name")
+            return bac_name
+
+        # Create Bank Account for bank transaction
+        bac_name = unique_name_for_bac(company_name)
+        self.bank_account = BankAccount.objects.create(company=company, name=bac_name)
 
         bank_tx = BankTransaction.objects.create(
             company=company,
