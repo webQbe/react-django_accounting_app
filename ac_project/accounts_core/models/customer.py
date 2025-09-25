@@ -1,17 +1,20 @@
-from django.db import models        # ORM base classes to define database tables as Python classes
-from .entitymembership import Company 
+from django.core.exceptions import \
+    ValidationError  # Built-in way to raise validation errors
+from django.db import \
+    models  # ORM base classes to define database tables as Python classes
+
 from ..managers import TenantManager
-from django.core.exceptions import ValidationError  # Built-in way to raise validation errors
 from .account import Account
+from .entitymembership import Company
 
 
 # ---------- Customer ----------
-class Customer(models.Model): # Represents client who receives invoices (AR side)
-
+# Represents client who receives invoices (AR side)
+class Customer(models.Model):
     # Multi-tenant: every customer belongs to a single company.
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
-    """ Example: 
-        Company A can have its own customers separate from Company B. 
+    """ Example:
+        Company A can have its own customers separate from Company B.
     """
 
     # The customer’s legal or trade name
@@ -25,54 +28,60 @@ class Customer(models.Model): # Represents client who receives invoices (AR side
     """ Example: If terms = 30 → invoice due 30 days after issue. """
 
     # FK to the Accounts Receivable account in Chart of Accounts
-    """ If set: when creating an invoice for this customer, 
-        the system automatically books AR lines to that account. 
+    """ If set: when creating an invoice for this customer,
+        the system automatically books AR lines to that account.
     """
     default_ar_account = models.ForeignKey(
-                            Account, 
-                            null=True, blank=True, 
-
-                            # If AR account is deleted/disabled, customer record isn’t broken, it just loses its default AR link.
-                            on_delete=models.SET_NULL,
-
-                            # Make reverse lookups possible
-                            # i.e., which customers use this AR account as default
-                            related_name="customers_default_ar",
-                            help_text="Default AR account used for this customer"
-                        )
+        Account,
+        null=True,
+        blank=True,
+        # If AR account is deleted/disabled,
+        # customer record isn’t broken, it just loses its default AR link.
+        on_delete=models.SET_NULL,
+        # Make reverse lookups possible
+        # i.e., which customers use this AR account as default
+        related_name="customers_default_ar",
+        help_text="Default AR account used for this customer",
+    )
 
     # Enforce tenant scoping
-    objects = TenantManager() 
+    objects = TenantManager()
 
     class Meta:
 
-        indexes = [ 
-                    models.Index(fields=["company", "name"]),
-                    models.Index(fields=["company", "default_ar_account"]),
-                ]
+        indexes = [
+            models.Index(fields=["company", "name"]),
+            models.Index(fields=["company", "default_ar_account"]),
+        ]
 
         # Enforce uniqueness per tenant
         constraints = [
-          models.UniqueConstraint(fields=["company", "name"], 
-                                  name="uq_company_customer_name"),
+            models.UniqueConstraint(
+                fields=["company", "name"], name="uq_company_customer_name"
+            ),
         ]
 
     # Display customer name in admin/UI
     def __str__(self):
         return self.name
 
-    
     def clean(self):
+        ar = self.default_ar_account
         # Ensure AR account belongs to the same company
-        if self.default_ar_account and self.default_ar_account.company_id != self.company_id:
+        if (
+            ar
+            and ar.company_id != self.company_id
+        ):
             raise ValidationError(
-                "Default AR account must belong to the same company as the customer."
+                "Default AR account & customer must belong to the same company"
             )
-        
-        # Only control accounts can be set as default AR (Customer) 
-        if self.default_ar_account and not self.default_ar_account.is_control_account:
-            raise ValidationError("Default AR account must be a control account")
-        
+
+        # Only control accounts can be set as default AR (Customer)
+
+        if ar and not ar.is_control_account:
+            raise ValidationError(
+                "Default AR account must be a control account")
+
         return super().clean()
 
     def save(self, *args, **kwargs):

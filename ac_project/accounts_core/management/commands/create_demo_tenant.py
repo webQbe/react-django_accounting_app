@@ -1,28 +1,20 @@
-from django.core.management.base import BaseCommand
-from django.contrib.auth import get_user_model
-from django.db import transaction
-from decimal import Decimal
 import datetime
+from decimal import Decimal
+from django.contrib.auth import get_user_model
+from django.core.management.base import BaseCommand
+from django.db import transaction
 from django.utils.text import slugify
-from accounts_core.models import (
-    Company,
-    Account,
-    Invoice,
-    JournalEntry,
-    JournalLine,
-    BankTransaction,
-    Currency,
-    Customer,
-    BankAccount,
-)
-
+from accounts_core.models import (Account, BankAccount, BankTransaction,
+                                  Company, Currency, Customer, Invoice,
+                                  JournalEntry, JournalLine)
 
 User = get_user_model()
 
 
 class Command(BaseCommand):
     help = (
-        "Create a demo tenant (company), user, and sample financial data for testing."
+        "Create a demo tenant (company), user,"
+        " and sample financial data for testing."
     )
 
     # Define command-line arguments
@@ -57,7 +49,8 @@ class Command(BaseCommand):
             # If plain slug is taken, append -1, -2, etc.
             while Company.objects.filter(slug=slug).exists():
                 slug = (
-                    f"{base}-{i}"  # Example: "test-ltd" → "test-ltd-1" → "test-ltd-2"
+                    # Example: "test-ltd" → "test-ltd-1" → "test-ltd-2"
+                    f"{base}-{i}"
                 )
                 i += 1  # Move to next number if slug is still not unique
                 if (
@@ -79,7 +72,8 @@ class Command(BaseCommand):
         # object → actual Company instance (existing or new).
         # created → boolean flag (True if newly created, False if reused)
         company, _ = (
-            Company.objects.get_or_create(  # ignore `created` boolean flag by naming it `_`
+            Company.objects.get_or_create(
+                # ignore `created` boolean flag by naming it `_`
                 # Look for Company where name=company_name
                 name=company_name,
                 defaults={"default_currency": usd, "slug": slug},
@@ -109,14 +103,18 @@ class Command(BaseCommand):
         user.company = company
         user.save()
         self.stdout.write(
-            self.style.SUCCESS(f"Created user: {user.username} (pw={password})")
+            self.style.SUCCESS(
+                f"Created user: {user.username} (pw={password})")
         )
 
         # 3. Create sample accounts
         cash, _ = Account.objects.get_or_create(
             company=company,
             code="1110",
-            defaults={"name": "Cash", "ac_type": "Asset", "normal_balance": "debit"},
+            defaults={
+                "name": "Cash",
+                "ac_type": "Asset",
+                "normal_balance": "debit"},
         )
         revenue, _ = Account.objects.get_or_create(
             company=company,
@@ -127,14 +125,16 @@ class Command(BaseCommand):
                 "normal_balance": "credit",
             },
         )
-        self.stdout.write(self.style.SUCCESS("Created accounts (Cash, Revenue)"))
+        self.stdout.write(self.style.SUCCESS(
+            "Created accounts (Cash, Revenue)"))
 
         # 4. Create sample invoice
         # Generate unique name for customer
         def unique_customer_for_company(name, max_tries=100):
             """
             Return a name that is not yet used for a Customer.
-            Starts with the exact `name`. If taken, tries name_customer-1, -2, ...
+            Starts with the exact `name`.
+            If taken, tries name_customer-1, -2, ...
             """
 
             base = name or "company"
@@ -148,9 +148,8 @@ class Command(BaseCommand):
 
             # otherwise iterate and find a free variation
             while Customer.objects.filter(name=name).exists():
-
-                c_name = f"{base[:4]} cus-{i}"  # Example: "Test cus-1" → "Test cus-2" → "Test cus-3"
-
+                c_name = f"{base[:4]} cus-{i}"
+                # Example: "Test cus-1" → "Test cus-2" → "Test cus-3"
                 if not Customer.objects.filter(name=c_name).exists():
                     return c_name
 
@@ -158,15 +157,15 @@ class Command(BaseCommand):
                 if (
                     i > max_tries
                 ):  # if we try 100 times and still can’t find a free name
-                    raise RuntimeError(
-                        f"Couldn't generate unique name for base={base} after {max_tries} tries"
-                    )  # bail out with an error
+                    # bail out with an error
+                    raise RuntimeError("Couldn't generate unique name")
             return c_name
 
         # Create customer for invoice
         c_name = unique_customer_for_company(company_name)
         self.customer = Customer.objects.create(company=company, name=c_name)
-        self.stdout.write(self.style.SUCCESS(f"Created customer: {self.customer}"))
+        self.stdout.write(self.style.SUCCESS(
+            f"Created customer: {self.customer}"))
 
         # Generate unique invoice number
         def unique_inv_no(c_name, max_tries=100):
@@ -179,16 +178,14 @@ class Command(BaseCommand):
                 return inv_no
 
             while Invoice.objects.filter(invoice_number=inv_no).exists():
-                inv_no = f"{base}-00{i}"  # Example: "tes-00" → "tes-001" → "tes-002"
-
+                inv_no = f"{base}-00{i}"
+                # Example: "tes-00" → "tes-001" → "tes-002"
                 if not Invoice.objects.filter(invoice_number=inv_no).exists():
                     return inv_no
 
                 i += 1
                 if i > max_tries:
-                    raise RuntimeError(
-                        f"Couldn't generate unique number for base={base} after {max_tries} tries"
-                    )
+                    raise RuntimeError("Couldn't generate unique number")
             return inv_no
 
         # Create Invoice for the customer
@@ -230,7 +227,8 @@ class Command(BaseCommand):
         )
         journal.post()
 
-        self.stdout.write(self.style.SUCCESS("Created journal entry with lines"))
+        self.stdout.write(self.style.SUCCESS(
+            "Created journal entry with lines"))
 
         # 6. Create bank transaction
 
@@ -239,17 +237,23 @@ class Command(BaseCommand):
             bac_name = name + "_BankAC"
             i = 1
             while BankAccount.objects.filter(name=bac_name).exists():
-                bac_name = f"{bac_name}-{i}"  # Example: "test-ltd_BankAC" → "test-ltd_BankAC-1" → "test-ltd_BankAC-2"
+                bac_name = f"{bac_name}-{i}"
                 i += 1
+                # Example:
+                # "test-ltd_BankAC" → "test-ltd_BankAC-1" → "test-ltd_BankAC-2"
                 if i > max_tries:
-                    raise RuntimeError("Couldn't generate unique bank account name")
+                    raise RuntimeError(
+                        "Couldn't generate unique bank account name")
             return bac_name
 
         # Create Bank Account for bank transaction
         bac_name = unique_name_for_bac(company_name)
-        self.bank_account = BankAccount.objects.create(company=company, name=bac_name)
+        self.bank_account = BankAccount.objects.create(
+            company=company,
+            name=bac_name
+        )
 
-        bank_tx = BankTransaction.objects.create(
+        BankTransaction.objects.create(
             company=company,
             bank_account=self.bank_account,
             payment_date=datetime.date.today(),

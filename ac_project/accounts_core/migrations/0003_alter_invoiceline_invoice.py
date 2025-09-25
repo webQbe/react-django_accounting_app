@@ -7,13 +7,17 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounts_core', '0002_alter_account_managers_and_more'),
+        ("accounts_core", "0002_alter_account_managers_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='invoiceline',
-            name='invoice',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='lines', to='accounts_core.invoice'),
+            model_name="invoiceline",
+            name="invoice",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="lines",
+                to="accounts_core.invoice",
+            ),
         ),
     ]

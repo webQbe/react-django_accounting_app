@@ -1,13 +1,12 @@
-from decimal import Decimal
 import datetime
-from django.test import TransactionTestCase
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
-from django.db import transaction
-from ..services import apply_bank_tx_to_inv   
-from ..models import (
-    Company, Currency, BankAccount, BankTransaction,
-    Invoice, BankTransactionInvoice 
-)
+from django.test import TransactionTestCase
+
+from ..models import (BankAccount, BankTransaction, BankTransactionInvoice,
+                      Company, Currency, Invoice)
+from ..services import apply_bank_tx_to_inv
 
 
 class ApplyBankTxTests(TransactionTestCase):
@@ -15,12 +14,12 @@ class ApplyBankTxTests(TransactionTestCase):
 
     def setUp(self):
         self.usd = Currency.objects.create(code="USD", name="US Dollar")
-        self.company = Company.objects.create(name="Test Co", default_currency=self.usd)
+        self.company = Company.objects.create(
+            name="Test Co", default_currency=self.usd)
 
         # a bank account that belongs to the company and uses USD
         self.bank_account = BankAccount.objects.create(
-            company=self.company,
-            name="Bank A"
+            company=self.company, name="Bank A"
         )
 
         # bank transaction for $100
@@ -29,27 +28,27 @@ class ApplyBankTxTests(TransactionTestCase):
             bank_account=self.bank_account,
             payment_date=datetime.date(2025, 9, 17),
             amount=Decimal("100.00"),
-            currency_code="USD"
+            currency_code="USD",
         )
 
         # two invoices with outstanding amounts
         self.inv1 = Invoice.objects.create(
-            company=self.company, 
+            company=self.company,
             date=datetime.date(2025, 9, 17),
-            total=Decimal("200.00"), 
-            outstanding_amount=Decimal("200.00")
+            total=Decimal("200.00"),
+            outstanding_amount=Decimal("200.00"),
         )
         self.inv2 = Invoice.objects.create(
-            company=self.company, 
+            company=self.company,
             date=datetime.date(2025, 9, 17),
-            total=Decimal("150.00"), 
-            outstanding_amount=Decimal("150.00")
+            total=Decimal("150.00"),
+            outstanding_amount=Decimal("150.00"),
         )
 
     def test_prevent_over_apply(self):
         """
-        If total requested application > bank transaction amount, 
-        service should raise (ValidationError or custom) and 
+        If total requested application > bank transaction amount,
+        service should raise (ValidationError or custom) and
         no BankTransactionInvoice rows should be persisted.
         """
         # try to apply 60 + 50 + 10 = 120 (> 100)
@@ -59,15 +58,18 @@ class ApplyBankTxTests(TransactionTestCase):
             {"invoice_id": self.inv1.id, "amount": Decimal("10.00")},
         ]
 
-        # Expect validation error (BankTransaction.clean() or apply_payment should detect over-apply)
+        # Expect validation error (BankTransaction.clean() or
+        # apply_payment should detect over-apply)
         with self.assertRaises(ValidationError):
             apply_bank_tx_to_inv(self.bt.id, invoice_applications)
 
         # Ensure no partial allocations were recorded
+        btinv = BankTransactionInvoice
         self.assertEqual(
-            BankTransactionInvoice.objects.filter(bank_transaction=self.bt).count(),
+            btinv.objects.filter(bank_transaction=self.bt).count(),
             0,
-            msg="No BankTransactionInvoice rows should be persisted when over-applying"
+            msg="No BankTransactionInvoice rows should be "
+            "persisted when over-applying",
         )
 
         # Ensure invoices' outstanding amounts were not changed
@@ -81,22 +83,29 @@ class ApplyBankTxTests(TransactionTestCase):
         If one apply in the middle raises (e.g. invoice does not exist),
         earlier successful applies must be rolled back.
         """
-        # valid first application, second references a non-existent invoice id -> will raise
+        # valid first application,
+        # second references a non-existent invoice id -> will raise
         invoice_applications = [
-            {"invoice_id": self.inv1.id, "amount": Decimal("40.00")},   # would succeed
-            {"invoice_id": 9999999, "amount": Decimal("50.00")},        # non-existent -> causes failure
+            {   # would succeed
+                "invoice_id": self.inv1.id, "amount": Decimal("40.00")
+            },
+            {  # non-existent -> causes failure
+                "invoice_id": 9999999,
+                "amount": Decimal("50.00"),
+            },
         ]
 
-        # narrow to the actual exception your apply_payment raises 
+        # narrow to the actual exception your apply_payment raises
         # (Invoice.DoesNotExist or ValidationError)
-        with self.assertRaises(Exception): 
+        with self.assertRaises(Exception):
             apply_bank_tx_to_inv(self.bt.id, invoice_applications)
 
         # Nothing persisted for this bank transaction
+        btinv = BankTransactionInvoice
         self.assertEqual(
-            BankTransactionInvoice.objects.filter(bank_transaction=self.bt).count(),
+            btinv.objects.filter(bank_transaction=self.bt).count(),
             0,
-            msg="Partial allocations should be rolled back on failure"
+            msg="Partial allocations should be rolled back on failure",
         )
 
         # invoice1 outstanding must remain unchanged

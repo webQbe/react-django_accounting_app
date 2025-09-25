@@ -1,21 +1,32 @@
-from django.db import models        # ORM base classes to define database tables as Python classes
-from .entitymembership import Company  
+from django.db import \
+    models  # ORM base classes to define database tables as Python classes
+
 from ..managers import TenantManager
+from .entitymembership import Company
+
 
 # ---------- Chart of Accounts ----------
-class AccountCategory(models.Model): # For organizing accounts into categories
-    company = models.ForeignKey(Company, on_delete=models.CASCADE) # each company has its own set of categories (multi-tenant safe)
-    name = models.CharField(max_length=100) # category’s label (e.g. "Current Assets")
-
+class AccountCategory(models.Model):  # For organizing accounts into categories
+    # each company has its own set of categories (multi-tenant safe)
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE
+    )
+    # category’s label (e.g. "Current Assets")
+    name = models.CharField(max_length=100)
     # Enforce tenant scoping
-    objects = TenantManager() 
+    objects = TenantManager()
 
     class Meta:
-        # Account category names repeat across companies but must be unique within one
+        # Account category names repeat across companies
+        # but must be unique within one
         constraints = [
-          models.UniqueConstraint(fields=["company", "name"], 
-                                  name="uq_company_accountcategory_name"),
-      ]
+            models.UniqueConstraint(
+                fields=["company", "name"],
+                name="uq_company_accountcategory_name"
+            ),
+        ]
 
     def __str__(self):
-        return f"{self.company.slug} - {self.name}" # Example: "acme - Current Assets"
+        comSlug = self.company.slug
+        name = self.name
+        return f"{comSlug} - {name}"  # Example: "acme - Current Assets"

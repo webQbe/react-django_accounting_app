@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('accounts_core', '0012_update_mv_trial_balance_running'),
+        ("accounts_core", "0012_update_mv_trial_balance_running"),
     ]
 
     """ Profit & Loss (period-based):
@@ -14,8 +14,8 @@ class Migration(migrations.Migration):
     """
 
     operations = [
-            migrations.RunSQL(
-                """
+        migrations.RunSQL(
+            """
                 CREATE MATERIALIZED VIEW mv_pl_period AS
                 SELECT
                     m.company_id,
@@ -35,10 +35,10 @@ class Migration(migrations.Migration):
                 CREATE UNIQUE INDEX ux_mv_pl_period_company_period
                     ON mv_pl_period (company_id, period_id);
                 """,
-                reverse_sql="DROP MATERIALIZED VIEW mv_pl_period;"
-            ),     
-        ]
-    
+            reverse_sql="DROP MATERIALIZED VIEW mv_pl_period;",
+        ),
+    ]
+
     """  SQL schema definition:
             - Makes a materialized view called mv_pl_period to store the query result physically in the database.
             - Pull data FROM `mv_jl_agg_period`, base aggregation matview

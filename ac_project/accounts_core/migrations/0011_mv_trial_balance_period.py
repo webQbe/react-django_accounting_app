@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('accounts_core', '0010_update_mv_jl_agg_period'),
+        ("accounts_core", "0010_update_mv_jl_agg_period"),
     ]
 
     """ Trial Balance (period-based): 
@@ -37,7 +37,7 @@ class Migration(migrations.Migration):
                 ON mv_trial_balance_period (company_id, period_id, account_id);
             """,
             # If you roll back this migration, Django will drop the view
-            reverse_sql="DROP MATERIALIZED VIEW mv_trial_balance_period;"
+            reverse_sql="DROP MATERIALIZED VIEW mv_trial_balance_period;",
         ),
     ]
 

@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('accounts_core', '0008_mv_jl_agg_period'),
+        ("accounts_core", "0008_mv_jl_agg_period"),
     ]
 
     """ Running Trial Balance Up to date:
@@ -40,11 +40,10 @@ class Migration(migrations.Migration):
             CREATE UNIQUE INDEX ux_mv_trial_balance_running_company_account
                 ON mv_trial_balance_running (company_id, account_id);
             """,
-            reverse_sql="DROP MATERIALIZED VIEW mv_trial_balance_running;"
-        ),  
-        
-     ]
-    
+            reverse_sql="DROP MATERIALIZED VIEW mv_trial_balance_running;",
+        ),
+    ]
+
     """ SQL schema definition:
         - Creates  'mv_trial_balance_running' a stored, precomputed view in the database
         - It is a snapshot of balances up to the present, without slicing by period.

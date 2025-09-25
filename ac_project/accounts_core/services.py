@@ -1,17 +1,16 @@
-from django.db import transaction
-from django.utils import timezone
-from django.core.exceptions import ValidationError
 from decimal import Decimal
-from django.db import models
+from typing import Dict, List
+
 from django.apps import apps
-from typing import Any, List, Dict
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
+from django.utils import timezone
 
 # Import models
-from .models import (
-    JournalEntry, JournalLine, BankTransaction, 
-    BankTransactionInvoice, BankTransactionBill, Invoice, Bill, FixedAsset,
-    Period, Account
-)
+from .models import (Account, BankTransaction, BankTransactionBill,
+                     BankTransactionInvoice, Bill, FixedAsset, Invoice,
+                     JournalEntry, JournalLine, Period)
+
 
 # ----------------------------
 # Journal-related workflows
@@ -23,9 +22,9 @@ def post_journal_entry(journal_entry_id, user=None):
     with transaction.atomic():
         # Lock the row to avoid race conditions
         je = JournalEntry.objects.select_for_update().get(pk=journal_entry_id)
-        # call posting logic and update state 
-        je.transition_to("posted", user=user) 
-        # user=None just means “this parameter is optional; 
+        # call posting logic and update state
+        je.transition_to("posted", user=user)
+        # user=None just means “this parameter is optional;
         # if you don’t provide it, we’ll treat it as no user”
     return je
 
@@ -38,9 +37,11 @@ def apply_inv_payment(bt_id: int, invoice_id: int, amount: float):
     Apply part (or all) of a bank transaction to an invoice.
     Locks both rows during the operation.
     """
-    with transaction.atomic(): # Everything inside either succeeds as one unit or rolls back if something fails
-
-        # Lock the bank transaction and invoice rows until the transaction finishes
+    # Everything inside either succeeds
+    # as one unit or rolls back if something fails
+    with transaction.atomic():
+        # Lock the bank transaction and invoice rows
+        # until the transaction finishes
         bt = BankTransaction.objects.select_for_update().get(pk=bt_id)
         inv = Invoice.objects.select_for_update().get(pk=invoice_id)
 
@@ -49,17 +50,21 @@ def apply_inv_payment(bt_id: int, invoice_id: int, amount: float):
             raise ValidationError("Payment exceeds invoice outstanding amount")
 
         # Validate bank transaction remaining capacity
-        total_applied = (
-            bt.banktransactioninvoice_set.aggregate(total=models.Sum("applied_amount"))["total"] or Decimal("0")
-        )
+        total_applied = bt.banktransactioninvoice_set.aggregate(
+            total=models.Sum("applied_amount")
+        )["total"] or Decimal("0")
 
         # Validation: prevent over-allocation
         if total_applied + amount > bt.amount:
-            raise ValidationError("Applied amounts exceed bank transaction amount")
+            raise ValidationError(
+                "Applied amounts exceed bank transaction amount")
 
         # Create join row
-            """ This represents X amount of this bank transaction settles this invoice """
-        BankTransactionInvoice.objects.create( # Creates join record in M2M table
+        """ This represents X amount of this
+              bank transaction settles this invoice """
+
+        # Create join record in M2M table
+        BankTransactionInvoice.objects.create(
             bank_transaction=bt,
             invoice=inv,
             applied_amount=amount,
@@ -81,16 +86,18 @@ def apply_inv_payment(bt_id: int, invoice_id: int, amount: float):
         bt.save(update_fields=["status"])
 
         return bt, inv
-    
+
+
 def apply_bank_tx_to_inv(bank_tx_id: int, invoice_applications: List[Dict]):
     with transaction.atomic():
         results = []
-        for ap in invoice_applications: 
+        for ap in invoice_applications:
             invoice_id = ap["invoice_id"]
             amount = ap["amount"]
             bt, inv = apply_inv_payment(bank_tx_id, invoice_id, amount)
             results.append((bt, inv))
         return results
+
 
 def apply_bill_payment(bt_id: int, bill_id: int, amount: float):
 
@@ -102,18 +109,19 @@ def apply_bill_payment(bt_id: int, bill_id: int, amount: float):
         if amount > bill.outstanding_amount:
             raise ValidationError("Payment exceeds bill outstanding amount")
 
-        total_applied = (
-            bt.banktransactionbill_set.aggregate(total=models.Sum("applied_amount"))["total"] or Decimal("0")
-        )
+        total_applied = bt.banktransactionbill_set.aggregate(
+            total=models.Sum("applied_amount")
+        )["total"] or Decimal("0")
 
         if total_applied + amount > bt.amount:
-            raise ValidationError("Applied amounts exceed bank transaction amount")
+            raise ValidationError(
+                "Applied amounts exceed bank transaction amount")
 
-        BankTransactionBill.objects.create( 
+        BankTransactionBill.objects.create(
             bank_transaction=bt,
             bill=bill,
             applied_amount=amount,
-            company=bt.company,  
+            company=bt.company,
         )
 
         bill.outstanding_amount -= amount
@@ -129,11 +137,12 @@ def apply_bill_payment(bt_id: int, bill_id: int, amount: float):
         bt.save(update_fields=["status"])
 
         return bt, bill
-    
+
+
 def apply_bank_tx_to_bill(bank_tx_id: int, bill_applications: List[Dict]):
     with transaction.atomic():
         results = []
-        for ap in bill_applications: 
+        for ap in bill_applications:
             bill_id = ap["bill_id"]
             amount = ap["amount"]
             bt, bill = apply_bill_payment(bank_tx_id, bill_id, amount)
@@ -150,7 +159,7 @@ def depreciate_asset(asset_id, period_id, user=None):
     Workflow:
       1. Calculate depreciation for the period.
       2. Create a JournalEntry (if not already posted).
-      3. Add JournalLines: 
+      3. Add JournalLines:
          - Debit Depreciation Expense
          - Credit Accumulated Depreciation.
     """
@@ -163,23 +172,23 @@ def depreciate_asset(asset_id, period_id, user=None):
     # Straight-line depreciation for simplicity
     depreciation_amount = asset.purchase_cost / asset.useful_life_years
 
-    
     # Account for Depreciation Expense
-    expense_acct = Account.objects.get(company=asset.company, code="6000") 
+    expense_acct = Account.objects.get(company=asset.company, code="6000")
     # Account for Accumulated Depreciation
     accum_dep_acct = Account.objects.get(company=asset.company, code="1500")
 
-    with transaction.atomic(): # depreciation entry + lines are either all committed or all rolled back
-
+    # depreciation entry + lines are either all committed or all rolled back
+    with transaction.atomic():
         # 1. Create JournalEntry header
+        je_desc = f"Depreciation for asset {asset.asset_code or asset.id}"
         je = JournalEntry.objects.create(
             company=asset.company,
             period=period,
             date=timezone.now().date(),
-            description=f"Depreciation for asset {asset.asset_code or asset.id}",
+            description=je_desc,
             status="draft",
             created_by=user,
-            source_type="FixedAsset", # Traceability: link back to the FixedAsset
+            source_type="FixedAsset",  # link back to FixedAsset
             source_id=asset.id,
         )
 
@@ -204,8 +213,8 @@ def depreciate_asset(asset_id, period_id, user=None):
             fixed_asset=asset,
         )
 
-         # 3. Post (validates balance)
-        je.post(user=user) 
+        # 3. Post (validates balance)
+        je.post(user=user)
 
     return je
 
@@ -213,18 +222,21 @@ def depreciate_asset(asset_id, period_id, user=None):
 # ------------------------------------
 # Snapshot update workflows
 # ------------------------------------
-def update_snapshots_for_journal(journal: JournalEntry): 
+def update_snapshots_for_journal(journal: JournalEntry):
     """Recalculate balances for accounts touched by this journal."""
     # Prevent circular import issue
     # Fetch models dynamically from Django app registry
-    AccountBalanceSnapshot = apps.get_model("accounts_core", "AccountBalanceSnapshot")
+    AccountBalanceSnapshot = apps.get_model(
+        "accounts_core", "AccountBalanceSnapshot")
 
-    # Loop over each child JournalLine to update snapshot of corresponding account
-    for line in journal.lines.all(): 
-        # journal.journalline_set.all() works because Django automatically gives you 
-        # the reverse relation manager from (journal: JournalEntry) → JournalLine
+    # Loop over each child JournalLine
+    # to update snapshot of corresponding account
+    for line in journal.lines.all():
+        # journal.journalline_set.all() works
+        # because Django automatically gives you reverse relation manager
+        # from (journal: JournalEntry) → JournalLine
         snapshot, _ = AccountBalanceSnapshot.objects.get_or_create(
-            # Grab snapshot row for (company, account, date) or 
+            # Grab snapshot row for (company, account, date) or
             # create one if missing
             company=journal.company,
             account=line.account,
@@ -232,29 +244,35 @@ def update_snapshots_for_journal(journal: JournalEntry):
         )
         # Update debit/credit aggregates
         # Add this line’s debit/credit to running balance for that day
-        snapshot.debit_balance += line.debit_local or 0 # don’t try to add None
+        # don’t try to add None
+        snapshot.debit_balance += line.debit_local or 0
         snapshot.credit_balance += line.credit_local or 0
-        snapshot.save() # Save updated snapshot
-
+        snapshot.save()  # Save updated snapshot
 
 
 # ------------------------------------
 # Invoice status update workflows
 # ------------------------------------
 """Move invoice from draft → open (after validation)."""
+
+
 def open_invoice(invoice: Invoice):
     if not invoice.lines.exists():
         # an invoice shouldn’t move out of draft without at least one line item
         raise ValidationError("Cannot open invoice with no lines")
-    invoice.transition_to("open") 
+    invoice.transition_to("open")
     return invoice
 
+
 """Move invoice from open → paid (only when outstanding == 0)."""
+
+
 def pay_invoice(invoice: Invoice):
     if invoice.outstanding_amount != 0:
         # Otherwise, you’d be marking unpaid invoices as paid.
-        raise ValidationError("Cannot mark invoice as paid until fully settled")
-    invoice.transition_to("paid") 
+        raise ValidationError(
+            "Cannot mark invoice as paid until fully settled")
+    invoice.transition_to("paid")
     return invoice
 
 
@@ -262,24 +280,32 @@ def pay_invoice(invoice: Invoice):
 # Bill status update workflows
 # ------------------------------------
 """Move bill from draft → posted (after validation)."""
+
+
 def post_bill(bill: Bill):
     if not bill.lines.exists():
         raise ValidationError("Cannot post bill with no lines")
-    bill.transition_to("posted") 
+    bill.transition_to("posted")
     return bill
 
+
 """Move bill from posted → paid (only when outstanding == 0)."""
+
+
 def pay_bill(bill: Bill):
     if bill.outstanding_amount != 0:
         raise ValidationError("Cannot mark bill as paid until fully settled")
-    bill.transition_to("paid") 
+    bill.transition_to("paid")
     return bill
+
 
 # ----------------------------------------
 # Bank Transaction status update workflows
 # ----------------------------------------
 
 """ Apply payment to invoice and update transition statuses safely """
+
+
 def pay_inv_and_update_status(bt_id, invoice_id, amount):
 
     with transaction.atomic():
@@ -292,7 +318,7 @@ def pay_inv_and_update_status(bt_id, invoice_id, amount):
             inv.transition_to("open")
 
         """  update bank transaction status """
-        # Call BankTransaction.applied_total() 
+        # Call BankTransaction.applied_total()
         # to find how much of this transaction has been applied to invoices
         if bt.applied_total() == 0:
             bt.transition_to("unapplied")
@@ -302,8 +328,11 @@ def pay_inv_and_update_status(bt_id, invoice_id, amount):
             bt.transition_to("fully_applied")
 
         return bt, inv
-    
+
+
 """ Apply payment to bill and update transition statuses safely """
+
+
 def pay_bill_and_update_status(bt_id, bill_id, amount):
 
     with transaction.atomic():
@@ -316,7 +345,7 @@ def pay_bill_and_update_status(bt_id, bill_id, amount):
             bill.transition_to("posted")
 
         """  update bank transaction status """
-        # Call BankTransaction.applied_total() 
+        # Call BankTransaction.applied_total()
         # to find how much of this transaction has been applied to bills
         if bt.applied_total() == 0:
             bt.transition_to("unapplied")
@@ -332,6 +361,7 @@ def pay_bill_and_update_status(bt_id, bill_id, amount):
 # Posting Account Validation workflows
 # ------------------------------------
 
+
 def post_invoice_to_journal(invoice: Invoice, user=None):
     ar_account = invoice.customer.default_ar_account
     if not ar_account or not ar_account.is_control_account:
@@ -344,7 +374,7 @@ def post_invoice_to_journal(invoice: Invoice, user=None):
         reference=invoice.invoice_number,
         description=f"Invoice {invoice.invoice_number}",
         created_by=user,
-        status="draft"
+        status="draft",
     )
 
     # Debit AR control account
@@ -353,19 +383,20 @@ def post_invoice_to_journal(invoice: Invoice, user=None):
         company=invoice.company,
         account=ar_account,
         debit_amount=invoice.total,
-        credit_amount=Decimal("0.00")
+        credit_amount=Decimal("0.00"),
     )
 
     # Credit revenue accounts from lines
     for line in invoice.lines.all():
         if not line.account or line.account.ac_type != "Income":
-            raise ValidationError("Invoice line must point to an Income account.")
+            raise ValidationError(
+                "Invoice line must point to an Income account.")
         JournalLine.objects.create(
             journal=journal,
             company=invoice.company,
             account=line.account,
             debit_amount=Decimal("0.00"),
-            credit_amount=line.line_total
+            credit_amount=line.line_total,
         )
     return journal
 
@@ -374,7 +405,8 @@ def post_bill_to_journal(bill: Bill, user=None):
     with transaction.atomic():
         ap_account = bill.vendor.default_ap_account
         if not ap_account or not ap_account.is_control_account:
-            raise ValidationError("Vendor must have a valid AP control account.")
+            raise ValidationError(
+                "Vendor must have a valid AP control account.")
 
         journal = JournalEntry.objects.create(
             company=bill.company,
@@ -382,19 +414,20 @@ def post_bill_to_journal(bill: Bill, user=None):
             reference=bill.bill_number,
             description=f"Bill {bill.bill_number}",
             created_by=user,
-            status="draft"
+            status="draft",
         )
 
         # Debit expenses account from lines
         for line in bill.lines.all():
             if not line.account or line.account.ac_type != "Expense":
-                raise ValidationError("Bill line must point to an Expense account.")
+                raise ValidationError(
+                    "Bill line must point to an Expense account.")
             JournalLine.objects.create(
                 journal=journal,
                 company=bill.company,
                 account=line.account,
                 debit_amount=line.line_total,
-                credit_amount=Decimal("0.00")
+                credit_amount=Decimal("0.00"),
             )
 
         # Credit AP control account
@@ -403,19 +436,20 @@ def post_bill_to_journal(bill: Bill, user=None):
             company=bill.company,
             account=ap_account,
             debit_amount=Decimal("0.00"),
-            credit_amount=bill.total
+            credit_amount=bill.total,
         )
 
-        bill.status = "posted" # finalized & journal entry created
+        bill.status = "posted"  # finalized & journal entry created
         bill.save(update_fields=["status"])
 
         return journal
-    
+
 
 def post_fixed_asset_to_journal(asset, user=None):
     with transaction.atomic():
         if not asset.account or asset.account.ac_type != "Asset":
-            raise ValidationError("Fixed asset must be linked to an Asset account.")
+            raise ValidationError(
+                "Fixed asset must be linked " "to an Asset account.")
 
         journal = JournalEntry.objects.create(
             company=asset.company,
@@ -423,7 +457,7 @@ def post_fixed_asset_to_journal(asset, user=None):
             reference=f"FA-{asset.id}",
             description=f"Fixed asset purchase: {asset.name}",
             created_by=user,
-            status="draft"
+            status="draft",
         )
 
         # Debit the asset account
@@ -432,7 +466,7 @@ def post_fixed_asset_to_journal(asset, user=None):
             company=asset.company,
             account=asset.account,
             debit_amount=asset.purchase_cost,
-            credit_amount=Decimal("0.00")
+            credit_amount=Decimal("0.00"),
         )
 
         # Credit AP or Bank
@@ -441,17 +475,19 @@ def post_fixed_asset_to_journal(asset, user=None):
         elif asset.bank_account:
             credit_account = asset.bank_account.account
         else:
-            raise ValidationError("Fixed asset must specify vendor (AP) or bank account.")
+            raise ValidationError(
+                "Fixed asset must specify vendor (AP) or bank account."
+            )
 
         JournalLine.objects.create(
             journal=journal,
             company=asset.company,
             account=credit_account,
             debit_amount=Decimal("0.00"),
-            credit_amount=asset.purchase_cost
+            credit_amount=asset.purchase_cost,
         )
 
-        asset.status = "capitalized" # update lifecycle state
+        asset.status = "capitalized"  # update lifecycle state
         asset.save(update_fields=["status"])
 
         return journal

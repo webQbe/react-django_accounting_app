@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import os
+
 from celery import Celery
 
 # ensure Django settings are set for Celery
@@ -13,4 +15,3 @@ celery_app.config_from_object("django.conf:settings", namespace="CELERY")
 
 # autoload tasks from installed apps
 celery_app.autodiscover_tasks()
-

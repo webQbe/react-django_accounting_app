@@ -7,93 +7,144 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounts_core', '0005_account_is_control_account_fixedasset_account_and_more'),
-        ('auth', '0012_alter_user_first_name_max_length'),
+        (
+            "accounts_core",
+            "0005_account_is_control_account_fixedasset_account_and_more",
+        ),
+        ("auth", "0012_alter_user_first_name_max_length"),
     ]
 
     operations = [
         migrations.AlterModelOptions(
-            name='user',
+            name="user",
             options={},
         ),
         migrations.AlterField(
-            model_name='banktransaction',
-            name='bank_account',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='accounts_core.bankaccount'),
+            model_name="banktransaction",
+            name="bank_account",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.PROTECT,
+                to="accounts_core.bankaccount",
+            ),
         ),
         migrations.AlterField(
-            model_name='bill',
-            name='status',
-            field=models.CharField(choices=[('draft', 'Draft'), ('posted', 'Posted'), ('paid', 'Paid')], default='draft', max_length=20),
+            model_name="bill",
+            name="status",
+            field=models.CharField(
+                choices=[("draft", "Draft"), ("posted", "Posted"), ("paid", "Paid")],
+                default="draft",
+                max_length=20,
+            ),
         ),
         migrations.AlterField(
-            model_name='invoice',
-            name='status',
-            field=models.CharField(choices=[('draft', 'Draft'), ('open', 'Open'), ('paid', 'Paid')], default='draft', max_length=10),
+            model_name="invoice",
+            name="status",
+            field=models.CharField(
+                choices=[("draft", "Draft"), ("open", "Open"), ("paid", "Paid")],
+                default="draft",
+                max_length=10,
+            ),
         ),
         migrations.AlterField(
-            model_name='journalentry',
-            name='status',
-            field=models.CharField(choices=[('draft', 'Draft'), ('ready', 'Ready'), ('posted', 'Posted')], default='draft JournalEntry workflow:\n                            draft → entry created but not yet validated\n                            ready → validated but not yet posted\n                            posted → locked, immutable\n                        ', max_length=10),
+            model_name="journalentry",
+            name="status",
+            field=models.CharField(
+                choices=[("draft", "Draft"), ("ready", "Ready"), ("posted", "Posted")],
+                default="draft JournalEntry workflow:\n                            draft → entry created but not yet validated\n                            ready → validated but not yet posted\n                            posted → locked, immutable\n                        ",
+                max_length=10,
+            ),
         ),
         migrations.AddIndex(
-            model_name='auditlog',
-            index=models.Index(fields=['company', 'user'], name='accounts_co_company_aeb035_idx'),
+            model_name="auditlog",
+            index=models.Index(
+                fields=["company", "user"], name="accounts_co_company_aeb035_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='auditlog',
-            index=models.Index(fields=['company', 'created_at'], name='accounts_co_company_703f9d_idx'),
+            model_name="auditlog",
+            index=models.Index(
+                fields=["company", "created_at"], name="accounts_co_company_703f9d_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='banktransactionbill',
-            index=models.Index(fields=['company', 'bank_transaction'], name='accounts_co_company_c0e88c_idx'),
+            model_name="banktransactionbill",
+            index=models.Index(
+                fields=["company", "bank_transaction"],
+                name="accounts_co_company_c0e88c_idx",
+            ),
         ),
         migrations.AddIndex(
-            model_name='banktransactionbill',
-            index=models.Index(fields=['company', 'bill'], name='accounts_co_company_d3702b_idx'),
+            model_name="banktransactionbill",
+            index=models.Index(
+                fields=["company", "bill"], name="accounts_co_company_d3702b_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='billline',
-            index=models.Index(fields=['company', 'account'], name='accounts_co_company_0ac6d0_idx'),
+            model_name="billline",
+            index=models.Index(
+                fields=["company", "account"], name="accounts_co_company_0ac6d0_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='customer',
-            index=models.Index(fields=['company', 'name'], name='accounts_co_company_59af30_idx'),
+            model_name="customer",
+            index=models.Index(
+                fields=["company", "name"], name="accounts_co_company_59af30_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='customer',
-            index=models.Index(fields=['company', 'default_ar_account'], name='accounts_co_company_d49f39_idx'),
+            model_name="customer",
+            index=models.Index(
+                fields=["company", "default_ar_account"],
+                name="accounts_co_company_d49f39_idx",
+            ),
         ),
         migrations.AddIndex(
-            model_name='period',
-            index=models.Index(fields=['company', 'start_date'], name='accounts_co_company_ef6044_idx'),
+            model_name="period",
+            index=models.Index(
+                fields=["company", "start_date"], name="accounts_co_company_ef6044_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='period',
-            index=models.Index(fields=['company', 'is_closed'], name='accounts_co_company_148470_idx'),
+            model_name="period",
+            index=models.Index(
+                fields=["company", "is_closed"], name="accounts_co_company_148470_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='user',
-            index=models.Index(fields=['default_company'], name='accounts_co_default_79acc3_idx'),
+            model_name="user",
+            index=models.Index(
+                fields=["default_company"], name="accounts_co_default_79acc3_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='vendor',
-            index=models.Index(fields=['company', 'name'], name='accounts_co_company_f07334_idx'),
+            model_name="vendor",
+            index=models.Index(
+                fields=["company", "name"], name="accounts_co_company_f07334_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='vendor',
-            index=models.Index(fields=['company', 'default_ap_account'], name='accounts_co_company_c1608f_idx'),
+            model_name="vendor",
+            index=models.Index(
+                fields=["company", "default_ap_account"],
+                name="accounts_co_company_c1608f_idx",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='banktransaction',
-            constraint=models.UniqueConstraint(fields=('company', 'reference'), name='uq_bt_company_ref'),
+            model_name="banktransaction",
+            constraint=models.UniqueConstraint(
+                fields=("company", "reference"), name="uq_bt_company_ref"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='fixedasset',
-            constraint=models.UniqueConstraint(fields=('company', 'asset_code'), name='uq_fa_company_asset_code'),
+            model_name="fixedasset",
+            constraint=models.UniqueConstraint(
+                fields=("company", "asset_code"), name="uq_fa_company_asset_code"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='journalentry',
-            constraint=models.UniqueConstraint(fields=('company', 'reference'), name='uq_je_company_ref'),
+            model_name="journalentry",
+            constraint=models.UniqueConstraint(
+                fields=("company", "reference"), name="uq_je_company_ref"
+            ),
         ),
     ]
