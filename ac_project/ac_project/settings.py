@@ -10,6 +10,9 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+# import Celery’s cron-style scheduler helper
+from celery.schedules import crontab
+
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,7 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-sedr2wv#^szp@btdu@0smt#cbdh*_45rdw#nmk+&pv9sqq=r5x'
+SECRET_KEY = "django-insecure-sedr2wv#^szp@btdu@0smt#cbdh*_45rdw#nmk+&pv9sqq=r5x"
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -31,57 +34,58 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'accounts_core',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "accounts_core",
 ]
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'accounts_core.middleware.CurrentCompanyMiddleware', # Attach .company to request based on logged-in user
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Attach .company to request based on logged-in user
+    "accounts_core.middleware.CurrentCompanyMiddleware",
 ]
 
-ROOT_URLCONF = 'ac_project.urls'
+ROOT_URLCONF = "ac_project.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'ac_project.wsgi.application'
+WSGI_APPLICATION = "ac_project.wsgi.application"
 
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'acdb',
-        'USER': 'sdishan',
-        'PASSWORD': 'isd',
-        'HOST': 'localhost',
-        'PORT': '5432',
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "acdb",
+        "USER": "sdishan",
+        "PASSWORD": "isd",
+        "HOST": "localhost",
+        "PORT": "5432",
     }
 }
 
@@ -89,18 +93,24 @@ DATABASES = {
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
+UASValidator = [
+    "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"]
+
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        "NAME": UASValidator[0],
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        "NAME":
+        "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        "NAME":
+        "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        "NAME":
+        "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
@@ -108,9 +118,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = "UTC"
 
 USE_I18N = True
 
@@ -120,30 +130,33 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = "static/"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTH_USER_MODEL = "accounts_core.User"
 
 # Schedule background full recomputation with Celery beat
 
-from celery.schedules import crontab # import Celery’s cron-style scheduler helper
 
 """ Run accounts_core.tasks.recompute_all_snapshots function now. """
-CELERY_BEAT_SCHEDULE = { # tell Celery Beat what to run and when
-    "recompute-snapshots-nightly": {                           # label for your job
-        "task": "accounts_core.tasks.recompute_all_snapshots", # import path to task function
-        "schedule": crontab(hour=0, minute=0),                 # run once a day at midnight
-        "args": (1,),                           # pass arguments to the task (company_id=1)             
+CELERY_BEAT_SCHEDULE = {  # tell Celery Beat what to run and when
+    "recompute-snapshots-nightly": {  # label for your job
+        # import path to task function
+        "task": "accounts_core.tasks.recompute_all_snapshots",
+        "schedule": crontab(hour=0, minute=0),  # run once a day at midnight
+        "args": (1,),  # pass arguments to the task (company_id=1)
     },
 }
 
 # Tell Celery where to send & receive jobs
-CELERY_BROKER_URL = "redis://localhost:6379/0" # Celery needs message broker (redis) to queue tasks
+CELERY_BROKER_URL = (
+    # Celery needs message broker (redis) to queue tasks
+    "redis://localhost:6379/0"
+)
 """ Use Redis server running on localhost/same machine.
 Port 6379 is Redis default.
-Database 0 - Redis lets you have multiple logical DBs, numbered 0–15. """
+Database 0 - Redis lets you have multiple logical DBs, numbered 0-15. """

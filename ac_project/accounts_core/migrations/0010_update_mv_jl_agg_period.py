@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('accounts_core', '0009_mv_trial_balance_running'),
+        ("accounts_core", "0009_mv_trial_balance_running"),
     ]
 
     """ Base aggregation matview :
@@ -67,7 +67,7 @@ class Migration(migrations.Migration):
                 ON mv_jl_agg_period (company_id, account_id);
             """,
             # SQL to undo view if you roll back migration (dropping the view)
-            reverse_sql="DROP MATERIALIZED VIEW mv_jl_agg_period;"
+            reverse_sql="DROP MATERIALIZED VIEW mv_jl_agg_period;",
         ),
     ]
 

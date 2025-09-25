@@ -1,37 +1,54 @@
-from django.shortcuts import render
-from django.shortcuts import get_object_or_404
-from django.http import JsonResponse
-from accounts_core.services import open_invoice, pay_invoice, pay_inv_and_update_status
-from .models import Invoice
-from django.core.exceptions import ValidationError
 from decimal import Decimal
+
+from django.core.exceptions import ValidationError
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
+
+from accounts_core.services import (open_invoice, pay_inv_and_update_status,
+                                    pay_invoice)
+
+from .models import Invoice
+
 
 # Create your views here.
 def open_invoice_view(request, invoice_id):
     # Look up Invoice by its primary key (invoice_id)
-    invoice = get_object_or_404(Invoice, pk=invoice_id) # If no invoice found, raise 404 error (instead of crashing)
-    open_invoice(invoice) # ensure invoice has lines before moving from status draft → open
+    invoice = get_object_or_404(
+        Invoice, pk=invoice_id
+    )  # If no invoice found, raise 404 error (instead of crashing)
+    open_invoice(
+        invoice
+    )  # ensure invoice has lines before moving from status draft → open
     # After applying the state transition, return a JSON response to client
     return JsonResponse({"status": invoice.status})
 
 
 def pay_invoice_view(request, invoice_id):
     invoice = get_object_or_404(Invoice, pk=invoice_id)
-    # ensure invoice’s outstanding balance is 0 before moving from status open → paid
+    # ensure invoice’s outstanding balance is 0
+    # before moving from status open → paid
     pay_invoice(invoice)
     return JsonResponse({"status": invoice.status})
+
 
 def apply_payment_view(request, bt_id, invoice_id):
     amount = Decimal(request.POST.get("amount"))
     # call the service and handle response or errors
-    try: 
+    try:
         bt, inv = pay_inv_and_update_status(bt_id, invoice_id, amount)
-        return JsonResponse({"ok": True, "bt_status": bt.status, "invoice_status": inv.status})
+        return JsonResponse(
+            {"ok": True, "bt_status": bt.status, "invoice_status": inv.status}
+        )
     except ValidationError as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
-    
+
+
 def invoice_list(request):
-    # Call Invoice.TenantManager.for_company(), assume middleware has set request.company
+    # Call Invoice.TenantManager.for_company(),
+    # assume middleware has set request.company
     # Get a lightweight dict with ids & descriptions, not full model instances.
-    invoices = Invoice.objects.for_company(request.company).values("id", "description")
-    return JsonResponse(list(invoices), safe=False) # `safe=False` returns a list instead of a dict
+    invTmforCom = Invoice.objects.for_company(request.company)
+    invoices = invTmforCom.values("id", "description")
+    return JsonResponse(
+        list(invoices), safe=False
+    )  # `safe=False` returns a list instead of a dict

@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('accounts_core', '0013_mv_pl_period'),
+        ("accounts_core", "0013_mv_pl_period"),
     ]
 
     """  Balance Sheet (snapshot):
@@ -13,10 +13,9 @@ class Migration(migrations.Migration):
        -  Enforces uniqueness and query speed with an index.
     """
 
-
     operations = [
-            migrations.RunSQL(
-                """
+        migrations.RunSQL(
+            """
                 CREATE MATERIALIZED VIEW mv_balance_sheet_running AS
                 SELECT
                     t.company_id,
@@ -32,11 +31,9 @@ class Migration(migrations.Migration):
                 CREATE UNIQUE INDEX ux_mv_balance_sheet_running_company_account
                     ON mv_balance_sheet_running (company_id, account_id);
                 """,
-                reverse_sql="DROP MATERIALIZED VIEW mv_balance_sheet_running;"
-            ),
-            
-        ]
-    
+            reverse_sql="DROP MATERIALIZED VIEW mv_balance_sheet_running;",
+        ),
+    ]
 
     """ SQL schema definition:
         - Creating a materialized view called mv_balance_sheet_running
@@ -48,4 +45,4 @@ class Migration(migrations.Migration):
         - UNIQUE INDEX ensures uniqueness on (company_id, account_id)
             - Prevents duplicate rows for the same account in a company.
             - Speeds up lookups
-    """     
+    """

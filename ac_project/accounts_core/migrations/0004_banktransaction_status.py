@@ -6,13 +6,21 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounts_core', '0003_alter_invoiceline_invoice'),
+        ("accounts_core", "0003_alter_invoiceline_invoice"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='banktransaction',
-            name='status',
-            field=models.CharField(choices=[('unapplied', 'Unapplied'), ('partially_applied', 'Partially applied'), ('fully_applied', 'Fully applied')], default='unapplied', max_length=20),
+            model_name="banktransaction",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("unapplied", "Unapplied"),
+                    ("partially_applied", "Partially applied"),
+                    ("fully_applied", "Fully applied"),
+                ],
+                default="unapplied",
+                max_length=20,
+            ),
         ),
     ]

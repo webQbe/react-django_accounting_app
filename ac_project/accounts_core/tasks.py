@@ -2,7 +2,8 @@ from celery import shared_task
 from django.db import models
 from django.utils import timezone
 
-@shared_task # register this function as a Celery task
+
+@shared_task  # register this function as a Celery task
 def recompute_all_snapshots(company_id):
     # import models lazily to avoid circular imports at module import time
     from .models import Account, AccountBalanceSnapshot, JournalLine
@@ -17,22 +18,19 @@ def recompute_all_snapshots(company_id):
         # To prevent 'or' from being applied inside aggregate() accidentally
         # Compute agg with Sum(...) first
         agg = JournalLine.objects.filter(account=account).aggregate(
-                    debit=models.Sum("debit_amount"),
-                    credit=models.Sum("credit_amount"),
-                ) 
-        # agg looks like: {"debit": Decimal("1500.00"), "credit": Decimal("750.00")}
+            debit=models.Sum("debit_amount"),
+            credit=models.Sum("credit_amount"),
+        )
+        # agg looks like:
+        # {"debit": Decimal("1500.00"), "credit": Decimal("750.00")}
         # If nothing was posted, Django returns None → so fallback to 0
-        debit = agg["debit"] or 0
-        credit = agg["credit"] or 0
-        """ if agg["debit"] is a real number → use it.
-            if agg["debit"] is None → use 0. """
 
         # Write a new snapshot row for this account
         AccountBalanceSnapshot.objects.create(
             company=account.company,
             account=account,
-            snapshot_date=timezone.now().date(), # Capture balances at this moment in time
+            # Capture balances at this moment in time
+            snapshot_date=timezone.now().date(),
             debit_balance=agg["debit"] or 0,
             credit_balance=agg["credit"] or 0,
         )
-

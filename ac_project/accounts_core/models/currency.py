@@ -1,10 +1,13 @@
-from django.db import models        # ORM base classes to define database tables as Python classes
+from django.db import \
+    models  # ORM base classes to define database tables as Python classes
+
 
 # ---------- Currency ----------
-class Currency(models.Model): # Store a list of valid currencies
+class Currency(models.Model):  # Store a list of valid currencies
     """
     ISO currencies. Use currency.code FK in other tables instead of free-text.
     """
+
     # Set code as the primary key, so it uniquely identifies a currency
     code = models.CharField(max_length=3, primary_key=True)  # 'USD', 'EUR'
     # Human-readable name of the currency
@@ -19,5 +22,6 @@ class Currency(models.Model): # Store a list of valid currencies
         return f"{self.code} ({self.symbol or ''})"
 
     class Meta:
-        # Make admin display plural as “currencies” instead of default “currencys”
+        # Make admin display plural
+        # as “currencies” instead of default “currencys”
         verbose_name_plural = "currencies"

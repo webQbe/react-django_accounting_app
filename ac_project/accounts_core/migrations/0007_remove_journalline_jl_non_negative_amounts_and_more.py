@@ -7,62 +7,92 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounts_core', '0006_alter_user_options_and_more'),
+        ("accounts_core", "0006_alter_user_options_and_more"),
     ]
 
     operations = [
         migrations.RemoveConstraint(
-            model_name='journalline',
-            name='jl_non_negative_amounts',
+            model_name="journalline",
+            name="jl_non_negative_amounts",
         ),
         migrations.RenameField(
-            model_name='journalline',
-            old_name='credit_amount',
-            new_name='credit_original',
+            model_name="journalline",
+            old_name="credit_amount",
+            new_name="credit_original",
         ),
         migrations.RenameField(
-            model_name='journalline',
-            old_name='debit_amount',
-            new_name='debit_original',
+            model_name="journalline",
+            old_name="debit_amount",
+            new_name="debit_original",
         ),
         migrations.AddField(
-            model_name='journalline',
-            name='credit_local',
+            model_name="journalline",
+            name="credit_local",
             field=models.DecimalField(decimal_places=2, default=0, max_digits=18),
         ),
         migrations.AddField(
-            model_name='journalline',
-            name='currency',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, to='accounts_core.currency'),
+            model_name="journalline",
+            name="currency",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.PROTECT,
+                to="accounts_core.currency",
+            ),
         ),
         migrations.AddField(
-            model_name='journalline',
-            name='debit_local',
+            model_name="journalline",
+            name="debit_local",
             field=models.DecimalField(decimal_places=2, default=0, max_digits=18),
         ),
         migrations.AddField(
-            model_name='journalline',
-            name='fx_rate',
-            field=models.DecimalField(blank=True, decimal_places=6, max_digits=18, null=True),
+            model_name="journalline",
+            name="fx_rate",
+            field=models.DecimalField(
+                blank=True, decimal_places=6, max_digits=18, null=True
+            ),
         ),
         migrations.AddConstraint(
-            model_name='journalline',
-            constraint=models.CheckConstraint(condition=models.Q(('debit_original__gte', 0), ('credit_original__gte', 0)), name='jl_non_negative_original_amounts'),
+            model_name="journalline",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("debit_original__gte", 0), ("credit_original__gte", 0)
+                ),
+                name="jl_non_negative_original_amounts",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='journalline',
-            constraint=models.CheckConstraint(condition=models.Q(('debit_local__gte', 0), ('credit_local__gte', 0)), name='jl_non_negative_local_amounts'),
+            model_name="journalline",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("debit_local__gte", 0), ("credit_local__gte", 0)),
+                name="jl_non_negative_local_amounts",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='journalline',
-            constraint=models.CheckConstraint(condition=models.Q(('debit_original', 0), ('credit_original', 0), _negated=True), name='debit_xor_credit_nonzero_original'),
+            model_name="journalline",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("debit_original", 0), ("credit_original", 0), _negated=True
+                ),
+                name="debit_xor_credit_nonzero_original",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='journalline',
-            constraint=models.CheckConstraint(condition=models.Q(('debit_local', 0), ('credit_local', 0), _negated=True), name='debit_xor_credit_nonzero_local'),
+            model_name="journalline",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("debit_local", 0), ("credit_local", 0), _negated=True
+                ),
+                name="debit_xor_credit_nonzero_local",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='journalline',
-            constraint=models.CheckConstraint(condition=models.Q(('fx_rate__isnull', True), ('fx_rate__gt', 0), _connector='OR'), name='fx_rate_null_or_positive'),
+            model_name="journalline",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("fx_rate__isnull", True), ("fx_rate__gt", 0), _connector="OR"
+                ),
+                name="fx_rate_null_or_positive",
+            ),
         ),
     ]

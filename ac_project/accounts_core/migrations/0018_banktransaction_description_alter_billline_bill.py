@@ -7,18 +7,22 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounts_core', '0017_item_default_unit_price'),
+        ("accounts_core", "0017_item_default_unit_price"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='banktransaction',
-            name='description',
+            model_name="banktransaction",
+            name="description",
             field=models.TextField(blank=True, null=True),
         ),
         migrations.AlterField(
-            model_name='billline',
-            name='bill',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='lines', to='accounts_core.bill'),
+            model_name="billline",
+            name="bill",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="lines",
+                to="accounts_core.bill",
+            ),
         ),
     ]
