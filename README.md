@@ -1,18 +1,18 @@
-# Accounting App
-
-
+# Accounting App - Contributing Guide
 
 ## Getting Started
 
-### Create a Virtual Environment
+### Create & Activate Virtual Environment
 
-1. **Navigate to your project directory**:
+1. **Clone the repo**
+
+2. **Navigate to your project directory**:
 
    ```bash
    cd /path/to/your/project
    ```
 
-2. **Create a virtual environment**:
+3. **Create a virtual environment**:
 
    ```bash
    python3.12 -m venv .venv
@@ -20,7 +20,7 @@
 
    This will create a `.venv` directory in your project folder.
 
-3. **Activate the virtual environment**:
+4. **Activate the virtual environment**:
 
    * On **Linux/macOS**:
 
@@ -34,176 +34,47 @@
      .venv\Scripts\Activate.ps1
      ```
 
-   After activation, your prompt should change to indicate the active environment, e.g., `(.venv)`.
-
-4. **Upgrade `pip`, `setuptools`, and `wheel`**:
-
-   ```bash
-   pip install --upgrade pip setuptools wheel
-   ```
-
-### Create Django app
-
-1. Open VS Code Terminal
-
-* In VS Code, open the integrated terminal (`Ctrl + backtick` `` ` ``).
-* Make sure you’re in your Django project root (where `manage.py` is).
-
----
-
-2. Run `startapp` to create your new app
-
-For your example (`accounts_core`):
-
-```bash
-python manage.py startapp accounts_core
-```
-
-3. Register the app in `settings.py`
-
-Open `yourproject/settings.py`, find `INSTALLED_APPS = [...]`, and add your app:
-
-```python
-INSTALLED_APPS = [
-...
-    'accounts_core', 
-]
-```
-
----
-
-4. Verify it’s working
-
-Run:
-
-```bash
-python manage.py makemigrations
-python manage.py migrate
-```
-
-### Run tasks automatically
+   After activation, your prompt should change to indicate the active environment, 
+   e.g., `(.venv)`.
 
 
-#### 1. Install Celery + Beat
+5. Install dependencies (Python packages):  
+  ```bash
+  pip install -r requirements.txt
+  ```
 
-In your project’s virtualenv:
+6. Install Database: PostgreSQL (via Docker)
+  ```bash
+  docker run --name ac-postgres -e POSTGRES_PASSWORD=secret -p 5432:5432 -d postgres:15
+  ```
 
-```bash
-pip install celery[redis]
-```
-
-* `celery` = the task queue
-* `[redis]` = adds Redis transport support (most common broker/backend)
-
-You’ll also need a broker (Redis is simplest):
-
-```bash
-sudo apt install redis-server
-```
-
-Start Redis:
-
-```bash
-redis-server
-```
-
----
-
-#### 2. Configure Celery
-
-- Update your `settings.py`
-- Update `__init__.py` of your project (next to `settings.py`)
-
-
-#### 3. Write your task
-
-In `ac_project/tasks.py`
-
-
----
-
-#### 4. Run Celery workers + Beat
-
-You need **two processes** running, run both in one combined process:
-
-```bash
-celery -A ac_project worker -B -l info
-```
-
-
-✅ Now Celery Beat will fire your task, and the Celery worker will execute it.
-
-
-
-### Set up Django Admin to view and manage models
-
-#### 1. Register models in `admin.py`
-- This makes both models appear in the Admin sidebar.
-
-
-#### Delete broken migration history (Optional)
-
+### Try it out on Django Admin
+1. Start the postgres db server
 Run:
 ```bash
-rm db.sqlite3
-find . -path "*/migrations/*.py" -not -name "__init__.py" -delete
+docker start ac-postgres
 ```
-
-#### 2. Make sure your custom user is active
-
-- Add to `settings.py`:
-```bash
-AUTH_USER_MODEL = "accounts_core.User"
-```
-
-#### 3. Create initial migrations for your app
-
-Run:
-```bash
-python manage.py makemigrations accounts_core
-```
-
-#### 4. Apply them in the right order
-
-Run:
-```bash
-python manage.py migrate
-```
-
-#### 5. Make the user manager (`TenantManager()`) inherits from `BaseUserManager`
-
-- Make sure custom user model's manager subclasses `django.contrib.auth.base_user.BaseUserManager` (this gives you `get_by_natural_key` and the usual `create_user` / `create_superuser` behavior).
-
-#### 6. Create a superuser
-
-Run:
-```bash
-python manage.py createsuperuser
-```
-
-#### 7. Try it out
-
-1. Start the dev server
+2. Start the dev server
 Run:
 ```bash
 python manage.py runserver
 ```
-2. Log into Admin:
+3. Log into Admin:
     - Open `http://127.0.0.1:8000/admin/`
     - Log in with the superuser you just created.
     - You should see all the models you registered in `admin.py`.
-3. Create a Company
-4. Add a Currency
-5. Add a Customer tied to that company.
-6. Try creating an Invoice — `clean()` and `save()` methods will enforce rules 
+4. Create a Company
+5. Add a Currency
+6. Add a Customer tied to that company.
+7. Try creating an Invoice — `clean()` and `save()` methods will enforce rules 
   *(e.g., no negative totals, no deleting invoices with payments, etc.).*
 
 
-## Demo Data
+### Demo Data
 To populate the database with a demo company and user:
 
 ```bash
-    python manage.py create_demo_tenant --company-name="Demo Ltd" --username=demo --password=demo123
+    make demo
 ```
 
 This creates:
@@ -212,7 +83,39 @@ This creates:
 - Sample accounts, invoices, journal entries, bank transactions
 
 
-## Database: Backup, Reset, and Migrations
+### Running Tests
+
+* Run the full test suite:
+
+  ```bash
+  pytest
+  ```
+* Run a specific test file:
+
+  ```bash
+  pytest accounts_core/tests/test_invoice_lifecycle.py
+  ```
+
+### Code Quality
+
+* Format code:
+
+  ```bash
+  black .
+  ```
+* Sort imports:
+
+  ```bash
+  isort .
+  ```
+* Run linter:
+
+  ```bash
+  flake8 .
+  ```
+
+
+### Database: Backup, Reset, and Migrations
 
 ### Backup
 

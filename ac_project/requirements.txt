@@ -1,0 +1,12 @@
+pip
+setuptools
+wheel
+black
+celery
+Django==5.2.5
+flake8
+isort
+pytest
+pytest-django
+redis
+python-decouple
