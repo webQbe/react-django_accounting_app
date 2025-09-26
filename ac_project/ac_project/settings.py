@@ -10,9 +10,10 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
+from decouple import config
 # import Celery’s cron-style scheduler helper
 from celery.schedules import crontab
-
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -22,11 +23,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-sedr2wv#^szp@btdu@0smt#cbdh*_45rdw#nmk+&pv9sqq=r5x"
+# 
+SECRET_KEY = config("SECRET_KEY", default="unsafe-default-key")
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# 
+DEBUG = config("DEBUG", default=False, cast=bool)
+
 
 ALLOWED_HOSTS = []
 
@@ -79,14 +81,17 @@ WSGI_APPLICATION = "ac_project.wsgi.application"
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    "default": {
+   "default": {  # Read sensitive info from environment variables
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "acdb",
-        "USER": "sdishan",
-        "PASSWORD": "isd",
-        "HOST": "localhost",
-        "PORT": "5432",
+        "NAME": config("POSTGRES_DB", default="mydb"),
+        "USER": config("POSTGRES_USER", default="myuser"),
+        "PASSWORD": config("POSTGRES_PASSWORD", default="password"),
+        "HOST": config("POSTGRES_HOST", default="localhost"),
+        "PORT": config("POSTGRES_PORT", default="5432"),
     }
+    # Locally: .env provides credentials.
+    # On CI / production: set real environment variables (export POSTGRES_PASSWORD=supersecret)
+    # No sensitive data is ever committed to GitHub.
 }
 
 
