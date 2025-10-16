@@ -1,15 +1,44 @@
-# Accounting App - Contributing Guide
+# Accounting Web App - Contributing Guide
+
+A production-ready backend for accounting web app built with Django. Implements **double-entry bookkeeping**, **tenant isolation**, **invoices/bills**, **bank transactions**, **fixed-asset depreciation** and **reporting** *(trial balance, income statement, balance sheet, cashflow, AR/AP aging)*. Includes **admin UI** for **rapid prototyping** and **materialized views** for fast reporting.
+
+
+## About
+Built from scratch using concepts learned from various tutorials:
+- Accounting fundamentals: 
+  - [*Principles of Accounting*](https://alison.com/course/principles-of-accounting)
+  - [*Introduction to Business Accounting*](https://alison.com/course/introduction-to-business-accounting)
+  - [*Cost Accounting & Classification*](https://alison.com/course/introduction-to-cost-accounting-and-cost-classification)
+  - [*Basic Concepts of Financial Analysis*](https://alison.com/course/fundamental-concepts-of-financial-analysis)
+-  Product research: 
+    - [*QuickBooks Online*](https://www.youtube.com/@quickbooks) & [*Xero*](https://www.youtube.com/@xero) feature walkthroughs
+- Schema & prototyping: 
+  - [*How to Create Accounting Database in MS Access (Professional)*](https://www.youtube.com/watch?v=0zcYwFU5OKE)
+- Databases & multi-tenant: 
+  - [*Advanced Diploma in Database Systems (modules 1–8)*](https://alison.com/course/advanced-diploma-in-database-systems)
+  - [*Multi-Tenant SaaS Architecture in 3 Simple Steps*](https://www.youtube.com/watch?v=bFLGwVyIotA)
+
+This is my implementation and learning exercise — credit given above.
+
+## What to look at
+- `admin/` — registered models
+- `management/commands/` — demo data management commands
+- `tests/` — automated tests
+
 
 ## Getting Started
 
 ### Create & Activate Virtual Environment
 
 1. **Clone the repo**
+    ```bash
+    git clone https://github.com/webQbe/react-django_accounting_app.git
+    ```
 
 2. **Navigate to your project directory**:
 
    ```bash
-   cd /path/to/your/project
+   cd react-django_accounting_app
    ```
 
 3. **Create a virtual environment**:
@@ -164,3 +193,7 @@ python manage.py migrate
 # Migrate to a previous state (e.g., app_name to migration 0005)
 python manage.py migrate app_name 0005
 ```
+
+
+## License
+MIT (or your chosen license)
