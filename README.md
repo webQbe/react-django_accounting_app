@@ -26,6 +26,12 @@ This is my implementation and learning exercise — credit given above.
 - `tests/` — automated tests
 
 
+## Database Design
+
+The following ER diagram illustrates the relationships between the models:
+
+![ER Diagram](MVP_logical.drawio.png)
+
 ## Getting Started
 
 ### Create & Activate Virtual Environment
@@ -196,4 +202,4 @@ python manage.py migrate app_name 0005
 
 
 ## License
-MIT (or your chosen license)
+MIT
