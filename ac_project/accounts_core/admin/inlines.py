@@ -21,8 +21,11 @@ class JournalLineInline(
     fields = (
         "account",
         "description",
-        "debit_amount",
-        "credit_amount",
+        "debit_original",
+        "credit_original",
+        "fx_rate",
+        "debit_local",
+        "credit_local",
         "invoice",
         "bill",
         "bank_transaction",
@@ -51,8 +54,11 @@ class JournalLineInline(
             return list(self.readonly_fields) + [
                 "account",
                 "description",
-                "debit_amount",
-                "credit_amount",
+                "debit_original",
+                "credit_original",
+                "fx_rate",
+                "debit_local",
+                "credit_local",
                 "invoice",
                 "bill",
                 "bank_transaction",
@@ -112,7 +118,7 @@ class BankTransactionInvoiceInline(TenantAdminMixin, admin.TabularInline):
     # Restrict company FK in dropdown
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related("invoice", "account", "bank_transaction")
+        return qs.select_related("invoice", "bank_transaction")
 
 
 class BankTransactionBillInline(TenantAdminMixin, admin.TabularInline):
@@ -126,4 +132,4 @@ class BankTransactionBillInline(TenantAdminMixin, admin.TabularInline):
     # Restrict company FK in dropdown
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related("bill", "account", "bank_transaction")
+        return qs.select_related("bill", "bank_transaction")
