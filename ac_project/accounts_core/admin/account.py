@@ -15,6 +15,8 @@ class AccountAdmin(TenantAdminMixin, admin.ModelAdmin):
         "name",
         "ac_type",
         "normal_balance",
+        "parent",
+        "is_control_account",
         "is_active",
     )
     list_filter = ("company", "ac_type", "is_active")
@@ -35,6 +37,7 @@ class AccountAdmin(TenantAdminMixin, admin.ModelAdmin):
                     "normal_balance",
                     "category",
                     "parent",
+                    "is_control_account",
                     "is_active",
                 )
             },
