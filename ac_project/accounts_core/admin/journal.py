@@ -2,6 +2,7 @@ from decimal import Decimal
 from django.contrib import admin
 from django.utils.html import format_html
 from accounts_core.models import JournalEntry, JournalLine
+from django.db.models import Prefetch
 from .actions import post_journal_entries
 from .inlines import JournalLineInline
 from .mixins import TenantAdminMixin
@@ -38,11 +39,14 @@ class JournalEntryAdmin(TenantAdminMixin, admin.ModelAdmin):
     # Fetch everything in one SQL join
     def get_queryset(self, request):
         qs = super().get_queryset(request)
+        journalline_qs = JournalLine.objects.select_related("account")
         return qs.select_related("company", "created_by").prefetch_related(
-            "journalline_set__account"
+            Prefetch("lines", queryset=journalline_qs, to_attr="prefetched_lines")
         )
     """ For each JournalEntry, prefetch all its JournalLines, and
-        within those lines also prefetch their linked Account objects."""
+        within those lines also prefetch their linked Account objects.
+        Use Prefetch with a select_related on the child queryset (reduces queries when accessing line.account).
+    """
 
     """ Computed column for balance check """
     # Show total debits / total credits for each journal

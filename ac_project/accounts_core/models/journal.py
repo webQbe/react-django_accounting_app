@@ -414,8 +414,8 @@ class JournalLine(models.Model):  # Stores Lines ( credits / debits )
         jid = self.journal_id
         acc = self.account.code
         acn = self.account.name
-        db = self.debit_amount or 0
-        cr = self.credit_amount or 0
+        db = self.debit_original or 0
+        cr = self.credit_original or 0
         return f"{jid} | {acc} {acn} | D:{db} C:{cr}"
 
     # Business logic validation:
@@ -423,7 +423,7 @@ class JournalLine(models.Model):  # Stores Lines ( credits / debits )
     # - Prevent mixing payable and receivable logic on one line
     # - Prevent “cross-company” contamination
     def clean(self):
-        # Ensures no negative values sneak in
+        # Ensure no negative values sneak in
         # (redundant with CheckConstraint but useful at app-level)
         if self.debit_original < 0 or self.credit_original < 0:
             raise ValidationError("Debit and credit must be >= 0")
@@ -439,6 +439,24 @@ class JournalLine(models.Model):  # Stores Lines ( credits / debits )
                 "JournalLine requires a non-0 amount on either debit or credit"
             )
 
+        # Derive effective company_id safely 
+        company_id = getattr(self, "company_id", None)
+
+        # If inline has journal_id (JE saved), query it
+        if company_id is None and getattr(self, "journal_id", None):
+            company_id = JournalEntry.objects.only("company_id").filter(pk=self.journal_id).values_list("company_id", flat=True).first()
+
+        # If JE is present but unsaved, maybe form set journal.company already
+        if company_id is None and getattr(self, "journal", None):
+            company_id = getattr(self.journal, "company_id", None) or (self.journal.company.id if getattr(self.journal, "company", None) else None)
+
+        # Enforce cross company checks only if company_id available
+        if self.account and company_id is not None and self.account.company_id != company_id:
+            raise ValidationError("JournalLine.account must belong to the same company.")
+
+        # If company_id is still None, company-based checks are skipped for now.
+        # They will be enforced later in save() when we can copy company from parent.
+
         # Invoice and Bill cannot both be set
         # A journal line can link to either an invoice or a bill,
         # but never both
@@ -449,51 +467,47 @@ class JournalLine(models.Model):  # Stores Lines ( credits / debits )
 
         # Company consistency
         # Every line must belong to same company as its parent journal
-        if self.journal and self.company != self.journal.company:
+        if self.journal_id and self.company_id != self.journal.company_id:
             raise ValidationError(
                 "JournalLine.company must" " equal JournalEntry.company"
             )
-        # Ensure account chosen belongs to the same company
-        if self.account and self.account.company != self.company:
-            raise ValidationError(
-                "JournalLine.account must belong to the same company."
-            )
+        
         # Ensure invoice chosen belongs to the same company
-        if self.invoice and self.invoice.company != self.company:
+        if self.invoice_id and self.invoice.company_id != self.company_id:
             raise ValidationError(
                 "JournalLine.invoice must belong to the same company."
             )
         # Ensure bill chosen belongs to the same company
-        if self.bill and self.bill.company != self.company:
+        if self.bill_id and self.bill.company_id != self.company_id:
             raise ValidationError(
                 "JournalLine.bill must " "belong to the same company."
-            )
+            )       
         # Ensure bank transaction chosen belongs to the same company
-        bt = self.bank_transaction
-        if bt and bt.company != self.company:
+        bt = self.bank_transaction_id
+        if bt and bt.company_id != self.company_id:
             raise ValidationError(
                 "JournalLine.bank_transaction must belong to the same company."
             )
         # Ensure fixed asset chosen belongs to the same company
-        if self.fixed_asset and self.fixed_asset.company != self.company:
+        if self.fixed_asset_id and self.fixed_asset.company_id != self.company_id:
             raise ValidationError(
                 "JournalLine.fixed_asset must belong to the same company."
             )
 
         # Check if an Invoice/Bill/Asset
         # references a non-control account → block it
-        if self.invoice and not self.account.is_control_account:
+        if self.invoice_id and not self.account.is_control_account:
             raise ValidationError(
                 "Invoice postings must " "use a control AR account.")
-        if self.bill and not self.account.is_control_account:
+        if self.bill_id and not self.account.is_control_account:
             raise ValidationError(
                 "Bill postings must " "use a control AP account.")
-        if self.fixed_asset and not self.account.is_control_account:
+        if self.fixed_asset_id and not self.account.is_control_account:
             raise ValidationError(
                 "Fixed asset postings " "must use a control account.")
 
         # Check if fx_rate valid
-        if self.currency != self.journal.company.default_currency:
+        if self.currency_id != self.journal.company.default_currency_id:
             if self.fx_rate is None or self.fx_rate <= 0:
                 raise ValidationError(
                     "fx_rate must be > 0 " "when currency differs")
@@ -568,6 +582,14 @@ class JournalLine(models.Model):  # Stores Lines ( credits / debits )
 
     # save() override
     def save(self, *args, **kwargs):
+        # If company not set but JE is known, get company_id from JE
+        if not getattr(self, "company_id", None) and getattr(self, "journal_id", None):
+            # JE saved
+            self.company_id = JournalEntry.objects.only("company_id").get(pk=self.journal_id).company_id
+        elif not getattr(self, "company_id", None) and getattr(self, "journal", None):
+            # JE maybe unsaved but its company field could be set on JE model instance
+            self.company = getattr(self.journal, "company", None)
+
         """Calculate debit_local / credit_local:
         - Local amounts are always stored,
         ready for reporting without recomputation.

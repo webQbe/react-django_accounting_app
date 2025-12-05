@@ -1,9 +1,9 @@
 from django.contrib import admin
 
 from accounts_core.models import (BankTransactionBill, BankTransactionInvoice,
-                                  BillLine, InvoiceLine, JournalLine)
+                                  BillLine, InvoiceLine, JournalLine, Account)
 
-from .forms import InvoiceLineForm
+from .forms import InvoiceLineForm, JournalLineInlineForm
 from .mixins import TenantAdminMixin
 
 # ---------- Helpful inline admin classes ----------
@@ -17,29 +17,41 @@ class JournalLineInline(
     """Show JournalLine rows on JournalEntry page"""
 
     model = JournalLine
+    form = JournalLineInlineForm # Inline form for JournalLine (admin)
     extra = 0  # don’t show “empty” rows by default (prevents clutter)
     fields = (
-        "account",
-        "description",
-        "debit_original",
-        "credit_original",
-        "fx_rate",
-        "debit_local",
-        "credit_local",
-        "invoice",
-        "bill",
-        "bank_transaction",
-        "fixed_asset",
-        "is_posted",
+        "account", 
+        "description", 
+        "debit_original", 
+        "credit_original", 
+        "currency", 
+        "invoice", 
+        "bill", 
+        "bank_transaction", 
+        "fixed_asset"
     )
     # fields appear in inline
     # fields that can be seen but not edited,
     # always read-only → protects audit trail
+    exclude = ("company",)  # hide company from inline
     readonly_fields = (
         "is_posted",
     )
     show_change_link = True  # each row has a link to full detail page
     ordering = ("id",)  # lines appear in creation order
+
+    def formfield_for_foreignkey(self, db_field, request=None, **kwargs):
+        # Run with access to request
+        if db_field.name == "account":
+            # prefer request.company if it's set it in middleware
+            # otherwise try request.user.default_company
+            company = getattr(request, "company", None) or getattr(request.user, "default_company", None)
+            if company:
+                kwargs["queryset"] = Account.objects.filter(company=company)
+            else:
+                # fallback: show all accounts or none.
+                kwargs["queryset"] = Account.objects.all()
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     # Restrict company FK in dropdown
     def get_queryset(self, request):
