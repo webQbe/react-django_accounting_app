@@ -327,7 +327,7 @@ class JournalLine(models.Model):  # Stores Lines ( credits / debits )
 
     # Conversion
     fx_rate = models.DecimalField(
-        max_digits=18, decimal_places=6, null=True, blank=True
+        max_digits=18, decimal_places=6, default=1
     )
 
     # Local (functional currency) amounts
@@ -483,7 +483,7 @@ class JournalLine(models.Model):  # Stores Lines ( credits / debits )
                 "JournalLine.bill must " "belong to the same company."
             )       
         # Ensure bank transaction chosen belongs to the same company
-        bt = self.bank_transaction_id
+        bt = self.bank_transaction
         if bt and bt.company_id != self.company_id:
             raise ValidationError(
                 "JournalLine.bank_transaction must belong to the same company."

@@ -38,6 +38,9 @@ class BankAccount(models.Model):  # Represents bank account company maintains
     last_reconciled_at = models.DateField(
         null=True, blank=True
     )  # For reconciliation workflows
+    ledger_account = models.ForeignKey('Account', 
+                                       null=True, blank=True, on_delete=models.PROTECT,
+                                       help_text="Ledger account that represents this bank account in the chart of accounts")
 
     # Enforce tenant scoping
     objects = TenantManager()

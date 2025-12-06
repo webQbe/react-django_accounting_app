@@ -1,6 +1,8 @@
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils.translation import gettext_lazy as _
+from accounts_core.models import JournalEntry
 
 # ---------- Admin actions ----------
 
@@ -12,37 +14,57 @@ def post_journal_entries(
     request,  # HTTP request object
     queryset,  # record what admin selected from list view
 ):
-    """Attempt to post selected draft journal entries."""
+    """
+    Admin action: attempt to post each selected JournalEntry safely.
+    - Locks each JE row while posting (select_for_update) to avoid races.
+    - Posts entries one-by-one inside their own transaction (safer for long lists).
+    - Reports success / per-entry failures via admin messages.
+    """
+    # Only attempt to post entries which are not already posted.
+    candidates = queryset.filter(status__in=["draft", "ready"])
+    total = candidates.count()
     success = 0
-    for je in queryset:  # Loop through all selected journal entries
-        # Track how many got successfully posted
+    failures = 0
+
+    # Process one journal entry per tiny transaction to avoid locking many rows at once.
+    for je in candidates:
         try:
-            # Wrap each posting in a DB transaction
-            # Ensure either all steps succeed or DB rolls back
             with transaction.atomic():
-                # Call `post()` on `JournalEntry` model
-                je.transition_to(
-                    "posted", user=request.user
-                )  # Pass `request.user`to record who posted it
-            success += 1  # If no error → increment success counter
-        except Exception as exc:  # Catch exception: ValidationError, etc.
-            # Show error message in Django admin interface
+                # re-load & lock the row to avoid race conditions
+                je_locked = JournalEntry.objects.select_for_update().get(pk=je.pk)
+                # call the model-level post logic (which itself is transactional/idempotent)
+                je_locked.post(user=request.user)
+            success += 1
+        except ValidationError as exc:
+            failures += 1
             modeladmin.message_user(
                 request,
-                f"Could not post JournalEntry {je.pk}: {exc}",
+                _("Could not post JournalEntry %(pk)s: %(err)s") % {"pk": je.pk, "err": exc},
+                level=messages.ERROR,
+            )
+        except Exception as exc:
+            failures += 1
+            # catch-all so one failure doesn't stop the whole batch
+            modeladmin.message_user(
+                request,
+                _("Error posting JournalEntry %(pk)s: %(err)s") % {"pk": je.pk, "err": exc},
                 level=messages.ERROR,
             )
 
-    # After the loop, give user success message
-    # for how many entries posted successfully
+    # Final summary message
     modeladmin.message_user(
-        request, f"Posted {success} JournalEntry(s).", level=messages.SUCCESS
+        request,
+        _("Posted %(success)d of %(total)d journal entries. %(failures)d failed.") % {
+            "success": success,
+            "total": total,
+            "failures": failures,
+        },
+        level=messages.SUCCESS if failures == 0 else messages.WARNING,
     )
 
+# how it will show in the admin UI
+post_journal_entries.short_description = _("Post selected journal entries (make immutable)")
 
-# Translatable text to show up in admin “Actions” dropdown
-# post_journal_entries.short_description =
-#   _("Post selected journal entries (make immutable)")
 
 
 """ Add button/action that call invoice.transition_to("open") """

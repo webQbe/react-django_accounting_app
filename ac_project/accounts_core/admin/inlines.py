@@ -25,6 +25,7 @@ class JournalLineInline(
         "debit_original", 
         "credit_original", 
         "currency", 
+        "fx_rate",
         "invoice", 
         "bill", 
         "bank_transaction", 

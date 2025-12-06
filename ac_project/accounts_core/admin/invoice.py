@@ -1,8 +1,10 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models import Prefetch
-
+from django.db import transaction
+from django.urls import path
+from django.shortcuts import get_object_or_404, redirect
 from accounts_core.models import Customer, Invoice, InvoiceLine
-
+from ..services import open_invoice
 from .actions import mark_inv_as_open, mark_inv_as_paid
 from .inlines import InvoiceLineInline
 from .mixins import TenantAdminMixin
@@ -23,15 +25,49 @@ class InvoiceAdmin(TenantAdminMixin, admin.ModelAdmin):
         "outstanding_amount",
     )
     list_filter = ("company", "status", "date")
-    actions = [mark_inv_as_open, mark_inv_as_paid]
+    actions = [mark_inv_as_open, mark_inv_as_paid, "post_selected_invoices"]
+    change_form_template = "admin/accounts_core/invoice/change_form.html"
     search_fields = ("invoice_number", "customer__name")
     inlines = [InvoiceLineInline]
+
+    @admin.action(description="Post selected invoices")
+    def post_selected_invoices(self, request, queryset):
+        success = 0
+        for inv in queryset:
+            try:
+                with transaction.atomic():
+                    # call the service that posts the invoice JE and transitions status
+                    open_invoice(inv, user=request.user)
+                success += 1
+            except Exception as exc:
+                self.message_user(
+                    request,
+                    f"Failed to post invoice {inv.pk}: {exc}",
+                    level=messages.ERROR,
+                )
+        self.message_user(request, f"Posted {success} of {queryset.count()} invoices.", level=messages.SUCCESS)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path('<path:object_id>/post/', self.admin_site.admin_view(self.post_invoice_view), name='accounts_core_invoice_post'),
+        ]
+        return custom + urls
+
+    def post_invoice_view(self, request, object_id):
+        inv = get_object_or_404(Invoice, pk=object_id)
+        try:
+            open_invoice(inv, user=request.user)
+            messages.success(request, f"Invoice {inv} posted.")
+        except Exception as exc:
+            messages.error(request, f"Failed to post invoice: {exc}")
+        # send user back to invoice change page
+        return redirect(request.META.get("HTTP_REFERER") or f"../../{object_id}/change/")
 
     """
         For each Invoice, prefetch all its InvoiceLines, and
         within those lines also prefetch their linked Item & Account objects.
     """
-
     def get_queryset(self, request):
         # queryset of invoices admin page will display - Invoice.objects.all()
         qs = super().get_queryset(request)

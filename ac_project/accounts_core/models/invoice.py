@@ -11,6 +11,7 @@ from .item import Item
 INV_STATUS_CHOICES = [
     ("draft", "Draft"),
     ("open", "Open"),
+    ("partially_paid", "Partially paid"),
     ("paid", "Paid"),
 ]
 
@@ -40,11 +41,12 @@ class Invoice(models.Model):  # Represents a customer invoice
     # payment deadline (can be auto-calculated from customer’s payment terms)
 
     status = models.CharField(
-        max_length=10, choices=INV_STATUS_CHOICES, default="draft"
-    )  # draft, open, paid, void
+        max_length=14, choices=INV_STATUS_CHOICES, default="draft"
+    )  
     """ Workflow:
         draft = not yet finalized.
         open = issued but not paid.
+        partially paid = partially settled
         paid = fully settled.
         void = canceled. """
 
@@ -326,6 +328,14 @@ class BankTransactionInvoice(
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE)
     # Allow partial application (e.g. $100 payment applied to a $250 invoice)
     applied_amount = models.DecimalField(max_digits=18, decimal_places=2)
+    journal_entry = models.ForeignKey(
+        "accounts_core.JournalEntry",         # use string to avoid circular import
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="bank_transaction_invoices",
+        help_text="JournalEntry created when this payment was applied to the invoice.",
+    )
 
     # Enforce tenant scoping
     objects = TenantManager()
@@ -358,35 +368,62 @@ class BankTransactionInvoice(
         return f"BT: {bt} → Inv: {no} Amt: ({applied})"
 
     def clean(self):
-        # You can’t apply negative payment
+        # basic applied_amount checks
+        if self.applied_amount is None:
+            return  # let required-field validators handle it
+
         if self.applied_amount < 0:
             raise ValidationError("Applied must be non-negative")
 
-        # cannot apply more than outstanding
-        # prevent “overpayment” situations where invoice would go negative
-        if self.applied_amount > self.invoice.outstanding_amount:
-            raise ValidationError(
-                "Applied amount cannot exceed invoice outstanding")
+        # only check outstanding_amount when invoice is set
+        if self.invoice_id:
+            if self.applied_amount > self.invoice.outstanding_amount:
+                raise ValidationError("Applied amount cannot exceed invoice outstanding")
 
-        # Prevent cross-company contamination
-        # Ensure Bank transaction chosen belongs to the same company
-        bt = self.bank_transaction
-        if bt and bt.company != self.company:
-            raise ValidationError(
-                "Bank transaction must " "belong to the same company."
-            )
+        # attempt to infer company_id from provided relations (do not access related object if id is None)
+        inferred_company_id = None
+        if self.company_id:
+            inferred_company_id = self.company_id
+        elif self.bank_transaction_id:
+            inferred_company_id = self.bank_transaction.company_id
+        elif self.invoice_id:
+            inferred_company_id = self.invoice.company_id
 
-        # Ensure invoice chosen belongs to the same company
-        if self.invoice and self.invoice.company != self.company:
-            raise ValidationError("Invoice must belong to the same company.")
+        # if both bank_transaction and company are present, ensure they match
+        if self.bank_transaction_id and self.company_id:
+            if self.bank_transaction.company_id != self.company_id:
+                raise ValidationError("Bank transaction must belong to the same company.")
 
-        """ You can't accidentally link a BankTransaction
-        from Company A to an Invoice from Company B. """
-        if self.invoice.company != self.bank_transaction.company:
-            raise ValidationError(
-                "Invoice and BankTransaction must belong to same company"
-            )
+        # if invoice provided and company present, ensure they match
+        if self.invoice_id and self.company_id:
+            if self.invoice.company_id != self.company_id:
+                raise ValidationError("Invoice must belong to the same company.")
+
+        # if both invoice and bank_transaction exist, they must match
+        if self.invoice_id and self.bank_transaction_id:
+            if self.invoice.company_id != self.bank_transaction.company_id:
+                raise ValidationError("Invoice and BankTransaction must belong to same company")
+
+        # if nothing is known about company yet, it's okay; model/DB-level validators should catch missing company where required
 
     def save(self, *args, **kwargs):
-        self.full_clean()  # run validations before saving
-        return super().save(*args, **kwargs)
+        # If company not set, try to infer from bank_transaction or invoice (this helps admin inline)
+        if not self.company_id:
+            if self.bank_transaction_id:
+                self.company_id = self.bank_transaction.company_id
+            elif self.invoice_id:
+                self.company_id = self.invoice.company_id
+        # run full_clean to validate
+        self.full_clean()
+
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+
+        # After save: apply payment only once, 
+        # only when applied_amount > 0 and no journal_entry saved yet.
+        # Use a simple guard: if journal_entry is already set, skip.
+        if self.applied_amount and self.applied_amount > Decimal("0.00") and not self.journal_entry:
+            # avoid recursion: check a flag or journal_entry presence
+            from ..services import apply_payment_to_invoice
+            # attach optional executer metadata (admin view can set _applied_by_user)
+            apply_payment_to_invoice(self, user=getattr(self, '_applied_by_user', None))
