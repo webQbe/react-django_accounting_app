@@ -172,16 +172,32 @@ class EntityMembership(
         return f"{self.user} @ {self.company} ({self.role})"
 
     def clean(self):
+        """
+        Ensure that if the user has a default_company set, the user actually
+        has a membership for that company.  Allow the current (unsaved)
+        EntityMembership being validated to satisfy that requirement.
+        """
         if self.user and self.user.default_company:
-            # Get user's memberships
-            # using `user` FK (related name = memberships)
-            usrMbrships = self.user.memberships
-            valid_company_ids = usrMbrships.values_list("company", flat=True)
-            # Check default company is among user’s memberships
-            if self.user.default_company not in valid_company_ids:
-                UsrCom = self.user.default_company
+            # Use PKs for comparisons to avoid instance vs int mismatch
+            default_company_pk = getattr(self.user.default_company, "pk", None)
+
+            # Collect existing membership company_ids for the user, 
+            if self.pk:
+                existing_company_ids = list(
+                    # excluding this record if updating
+                    self.user.memberships.exclude(pk=self.pk).values_list("company_id", flat=True)
+                )
+            else:
+                existing_company_ids = list(
+                    self.user.memberships.values_list("company_id", flat=True)
+                )
+
+            # The default company must be among existing memberships of the user.
+            # If not, allow it if the current (unsaved) membership is for that company.
+            current_company_pk = getattr(self.company, "pk", None)
+            if default_company_pk not in existing_company_ids and default_company_pk != current_company_pk:
                 raise ValidationError(
-                    f"Default company {UsrCom} must be a user's membership."
+                    f"Default company {self.user.default_company} must be a user's membership."
                 )
 
     def save(self, *args, **kwargs):
