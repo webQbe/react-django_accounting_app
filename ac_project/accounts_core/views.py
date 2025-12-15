@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 
-from accounts_core.services import (open_invoice, pay_inv_and_update_status,
+from accounts_core.services.update import (open_invoice, pay_inv_and_update_status,
                                     pay_invoice)
 
 from .models import Invoice

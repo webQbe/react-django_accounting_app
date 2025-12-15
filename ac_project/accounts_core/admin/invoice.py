@@ -4,7 +4,7 @@ from django.db import transaction
 from django.urls import path
 from django.shortcuts import get_object_or_404, redirect
 from accounts_core.models import Customer, Invoice, InvoiceLine
-from ..services import open_invoice
+from ..services.update import open_invoice
 from .actions import mark_inv_as_open, mark_inv_as_paid
 from .inlines import InvoiceLineInline
 from .mixins import TenantAdminMixin

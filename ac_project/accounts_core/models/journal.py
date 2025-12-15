@@ -5,12 +5,14 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
+from django.db.models import Sum
 from ..exceptions import AlreadyPostedDifferentPayload, UnbalancedJournalError
 from ..managers import JournalLineCurrencyManager, TenantManager
 from .account import Account
 from .currency import Currency
 from .entitymembership import Company
 from .period import Period
+from ..services.audit_helper import log_action
 
 JOURNAL_STATUS = [
     ("draft", "Draft"),  # still editable
@@ -215,6 +217,21 @@ class JournalEntry(models.Model):  # Represents one accounting transaction
         je.save(
             update_fields=[
                 "status", "posted_at", "created_by", "posting_fingerprint"]
+        )
+
+        # Log JournalEntry posting
+        log_action(
+            action="post",
+            instance=self,
+            user=user,
+            changes={
+                "debits": str(self.lines.aggregate(
+                    total=Sum("debit_original")
+                )["total"]),
+                "credits": str(self.lines.aggregate(
+                    total=Sum("credit_original")
+                )["total"]),
+            },
         )
 
         # mark all lines as posted (bulk update)
