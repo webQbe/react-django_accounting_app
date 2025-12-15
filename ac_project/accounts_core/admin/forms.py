@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.contrib.auth.forms import (
     UserChangeForm as DjangoUserChangeForm,
     UserCreationForm as DjangoUserCreationForm)
-from accounts_core.models import Invoice, InvoiceLine, User, JournalLine, Account, JournalEntry
+from accounts_core.models import Invoice, InvoiceLine, User, JournalLine, Account, FixedAsset
 
 # -----------------------------
 # Register custom admin forms
@@ -101,4 +101,34 @@ class JournalLineInlineForm(forms.ModelForm):
 
         return cleaned
 
-    
+
+class FixedAssetAdminForm(forms.ModelForm):
+    class Meta:
+        model = FixedAsset
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # name of FK to account 
+        account_field_name = "account"
+
+        # try to determine company in descending order:
+        company = None
+        # 1) change form: instance has company
+        if getattr(self.instance, "pk", None) and getattr(self.instance, "company", None):
+            company = self.instance.company
+        # 2) initial data passed to form (e.g. admin add with ?company=1)
+        elif self.initial.get("company"):
+            company = self.initial.get("company")
+        # 3) try cleaned initial in kwargs (admin sometimes passes initial kwarg)
+        elif kwargs.get("initial") and kwargs["initial"].get("company"):
+            company = kwargs["initial"].get("company")
+
+        if account_field_name in self.fields:
+            if company:
+                self.fields[account_field_name].queryset = Account.objects.filter(company=company)
+            else:
+                # fallback: show all accounts instead of an empty set
+                self.fields[account_field_name].queryset = Account.objects.all()
+

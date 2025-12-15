@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from accounts_core.models import FixedAsset, Item
-
+from .forms import FixedAssetAdminForm
 from .mixins import TenantAdminMixin
 
 
@@ -20,6 +20,7 @@ class ItemAdmin(TenantAdminMixin, admin.ModelAdmin):
 # Register `FixedAsset` model
 @admin.register(FixedAsset)
 class FixedAssetAdmin(TenantAdminMixin, admin.ModelAdmin):
+    form = FixedAssetAdminForm
     list_display = (
         "id",
         "company",
