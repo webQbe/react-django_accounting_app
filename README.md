@@ -87,21 +87,25 @@ The following ER diagram illustrates the relationships between the models:
 1. Start the postgres db server
 Run:
 ```bash
-docker start ac-postgres
+  docker start ac-postgres
 ```
-2. Start the dev server
+2. Create superuser:
+```bash
+  python manage.py createsuperuser
+```
+3. Start the dev server
 Run:
 ```bash
-python manage.py runserver
+  python manage.py runserver
 ```
-3. Log into Admin:
+4. Log into Admin:
     - Open `http://127.0.0.1:8000/admin/`
     - Log in with the superuser you just created.
     - You should see all the models you registered in `admin.py`.
-4. Create a Company
-5. Add a Currency
-6. Add a Customer tied to that company.
-7. Try creating an Invoice — `clean()` and `save()` methods will enforce rules 
+5. Create a Company
+6. Add a Currency
+7. Add a Customer tied to that company.
+8. Try creating an Invoice — `clean()` and `save()` methods will enforce rules 
   *(e.g., no negative totals, no deleting invoices with payments, etc.).*
 
 
