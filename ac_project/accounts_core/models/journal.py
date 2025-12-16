@@ -158,7 +158,7 @@ class JournalEntry(models.Model):  # Represents one accounting transaction
         lines = je.lines.select_for_update().all()
 
         # lazy import to avoid circular import at module load time
-        from ..services import update_snapshots_for_journal
+        from ..services.update import update_snapshots_for_journal
 
         """ Business validations """
         if not lines.exists():  # Prevent posting an empty entry

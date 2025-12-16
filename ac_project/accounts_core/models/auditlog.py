@@ -61,14 +61,13 @@ class AuditLog(
         return f"[{time:%Y-%m-%d %H:%M}] {usr} {action} {objType}({objId})"
 
     def clean(self):
-        # Ensure the user is a member of the company being logged
         if self.user and self.company:
-            if not self.user.memberships.filter(
-                company=self.company, is_active=True
-            ).exists():
-                raise ValidationError(
-                    "AuditLog.user must be a member of AuditLog.company"
-                )
+            # Accept superuser/staff without membership
+            if getattr(self.user, "is_superuser", False) or getattr(self.user, "is_staff", False):
+                return
+            if not self.user.memberships.filter(company=self.company, is_active=True).exists():
+                raise ValidationError("AuditLog.user must be a member of AuditLog.company")
+
 
     def save(self, *args, **kwargs):
         self.full_clean()  # run validations before saving
