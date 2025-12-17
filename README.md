@@ -175,16 +175,6 @@ Use this if you need a fresh start in development (⚠️ will delete all data).
 ```bash
 # Drop all tables and recreate from migrations
 python manage.py flush     # resets data, keeps schema
-
-# OR drop the whole DB (Postgres example)
-dropdb acdb
-createdb acdb
-python manage.py migrate
-
-# If using Docker, reset the database with:
-docker exec -it ac-postgres dropdb -U <username> acdb
-docker exec -it ac-postgres createdb -U <username> acdb
-python manage.py migrate
 ```
 
 ### Applying Migrations

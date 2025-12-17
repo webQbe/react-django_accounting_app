@@ -6,7 +6,6 @@ from accounts_core.models import JournalEntry
 
 # ---------- Admin actions ----------
 
-
 @admin.action(description="Mark selected journals as Posted")
 # Bulk-post multiple journal entries from Django admin list view
 def post_journal_entries(
@@ -139,8 +138,6 @@ def mark_bill_as_posted(modeladmin, request, queryset):
 
 
 """ call bill.transition_to("paid") """
-
-
 @admin.action(description="Mark selected bills as Paid")
 def mark_bill_as_paid(modeladmin, request, queryset):
     for bill in queryset:

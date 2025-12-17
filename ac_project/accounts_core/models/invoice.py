@@ -424,6 +424,6 @@ class BankTransactionInvoice(
         # Use a simple guard: if journal_entry is already set, skip.
         if self.applied_amount and self.applied_amount > Decimal("0.00") and not self.journal_entry:
             # avoid recursion: check a flag or journal_entry presence
-            from ..services import apply_payment_to_invoice
+            from ..services.payment import apply_payment_to_invoice
             # attach optional executer metadata (admin view can set _applied_by_user)
             apply_payment_to_invoice(self, user=getattr(self, '_applied_by_user', None))

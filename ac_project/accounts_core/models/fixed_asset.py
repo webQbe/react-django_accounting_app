@@ -29,7 +29,7 @@ class FixedAsset(
         on_delete=models.PROTECT,
         null=True,
         blank=True,
-        limit_choices_to={"ac_type": "Asset"},
+        limit_choices_to={"ac_type": "asset"},
         help_text="GL account where this asset is capitalized",
     )
     # who sold it to you
@@ -54,11 +54,8 @@ class FixedAsset(
     useful_life_years = models.IntegerField(null=True, blank=True)
     depreciation_method = models.CharField(
         max_length=30,
-        default="straight_line"
-        """ How depreciation is calculated:
-            "straight_line" = equal expense every year.
-             Other methods could include
-             "declining_balance", "units_of_production". """,
+        default="straight_line",
+        help_text="How depreciation is calculated: straight_line = equal expense every year. Other methods could include declining_balance & units_of_production"
     )
 
     # Track how much depreciation has already been recorded
