@@ -79,6 +79,20 @@ class JournalLineInline(
             ]
         return self.readonly_fields
 
+    # Hide add new line option
+    def has_add_permission(self, request, obj=None):
+        # If parent JE is posted, don't allow adding new lines
+        if obj and getattr(obj, "status", None) == "posted":
+            return False
+        return super().has_add_permission(request, obj)
+
+    # Hide delete options
+    def has_delete_permission(self, request, obj=None):
+        # If parent JE is posted, disallow deleting lines
+        if obj and getattr(obj, "status", None) == "posted":
+            return False
+        return super().has_delete_permission(request, obj)
+ 
 
 class InvoiceLineInline(TenantAdminMixin, admin.TabularInline):
     """Shows invoice lines under an Invoice page"""

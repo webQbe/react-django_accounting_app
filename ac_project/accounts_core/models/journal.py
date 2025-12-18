@@ -251,7 +251,7 @@ class JournalEntry(models.Model):  # Represents one accounting transaction
             # Load original DB version before edits
             orig = JournalEntry.objects.get(pk=self.pk)
             # if attempting to change any core fields after posted
-            if orig.status.posted:
+            if orig.status == "posted":
                 changed = False  # allow no changes if posted (strict)
                 # compare changes in "description", "period_id" fields
                 for f in ("description", "period_id"):
@@ -436,144 +436,127 @@ class JournalLine(models.Model):  # Stores Lines ( credits / debits )
         return f"{jid} | {acc} {acn} | D:{db} C:{cr}"
 
     # Business logic validation:
+    # - Forbid creating/updating a line if the parent journal is posted
     # - Debit/credit should always be non-negative
     # - Prevent mixing payable and receivable logic on one line
     # - Prevent “cross-company” contamination
     def clean(self):
-        # Ensure no negative values sneak in
-        # (redundant with CheckConstraint but useful at app-level)
-        if self.debit_original < 0 or self.credit_original < 0:
-            raise ValidationError("Debit and credit must be >= 0")
-
-        # ensure debit xor credit or both allowed?
-        # Usually one is zero.
-        if (self.debit_original > 0) and (self.credit_original > 0):
-            raise ValidationError(
-                "JournalLine should not have both debit and credit > 0"
-            )
-        if (self.debit_original == 0) and (self.credit_original == 0):
-            raise ValidationError(
-                "JournalLine requires a non-0 amount on either debit or credit"
-            )
-
-        # Derive effective company_id safely 
-        company_id = getattr(self, "company_id", None)
-
-        # If inline has journal_id (JE saved), query it
-        if company_id is None and getattr(self, "journal_id", None):
-            company_id = JournalEntry.objects.only("company_id").filter(pk=self.journal_id).values_list("company_id", flat=True).first()
-
-        # If JE is present but unsaved, maybe form set journal.company already
-        if company_id is None and getattr(self, "journal", None):
-            company_id = getattr(self.journal, "company_id", None) or (self.journal.company.id if getattr(self.journal, "company", None) else None)
-
-        # Enforce cross company checks only if company_id available
-        if self.account and company_id is not None and self.account.company_id != company_id:
-            raise ValidationError("JournalLine.account must belong to the same company.")
-
-        # If company_id is still None, company-based checks are skipped for now.
-        # They will be enforced later in save() when we can copy company from parent.
-
-        # Invoice and Bill cannot both be set
-        # A journal line can link to either an invoice or a bill,
-        # but never both
-        if self.invoice and self.bill:
-            raise ValidationError(
-                "JournalLine cannot reference " "both invoice and bill."
-            )
-
-        # Company consistency
-        # Every line must belong to same company as its parent journal
-        if self.journal_id and self.company_id != self.journal.company_id:
-            raise ValidationError(
-                "JournalLine.company must" " equal JournalEntry.company"
-            )
-        
-        # Ensure invoice chosen belongs to the same company
-        if self.invoice_id and self.invoice.company_id != self.company_id:
-            raise ValidationError(
-                "JournalLine.invoice must belong to the same company."
-            )
-        # Ensure bill chosen belongs to the same company
-        if self.bill_id and self.bill.company_id != self.company_id:
-            raise ValidationError(
-                "JournalLine.bill must " "belong to the same company."
-            )       
-        # Ensure bank transaction chosen belongs to the same company
-        bt = self.bank_transaction
-        if bt and bt.company_id != self.company_id:
-            raise ValidationError(
-                "JournalLine.bank_transaction must belong to the same company."
-            )
-        # Ensure fixed asset chosen belongs to the same company
-        if self.fixed_asset_id and self.fixed_asset.company_id != self.company_id:
-            raise ValidationError(
-                "JournalLine.fixed_asset must belong to the same company."
-            )
-
-        # Check if an Invoice/Bill/Asset
-        # references a non-control account → block it
-        if self.invoice_id and not self.account.is_control_account:
-            raise ValidationError(
-                "Invoice postings must " "use a control AR account.")
-        if self.bill_id and not self.account.is_control_account:
-            raise ValidationError(
-                "Bill postings must " "use a control AP account.")
-        if self.fixed_asset_id and not self.account.is_control_account:
-            raise ValidationError(
-                "Fixed asset postings " "must use a control account.")
-
-        # Check if fx_rate valid
-        if self.currency_id != self.journal.company.default_currency_id:
-            if self.fx_rate is None or self.fx_rate <= 0:
-                raise ValidationError(
-                    "fx_rate must be > 0 " "when currency differs")
-        elif self.fx_rate not in (None, 1.0):
-            raise ValidationError(
-                "fx_rate must be None " "or 1.0 for default currency")
-
-        # If there's a parent journal set, check DB for its posted flag.
+        # If parent journal exists and is posted, 
+        # block any create/update that modifies amounts/accounts/etc.
         if self.journal_id:
-            # Query DB for posted state (one small query)
-            posted = JournalEntry.objects.filter(
-                pk=self.journal_id, status="posted"
-            ).exists()
-            if posted:
-                # If this is an existing line being updated
+            if JournalEntry.objects.filter(pk=self.journal_id, status="posted").exists():
+                # allow no changes at all (creation is also blocked because parent is posted)
                 if self.pk:
-                    # Compare persisted values to attempted values.
-                    # If anything changed, forbid it.
-                    try:
-                        orig = JournalLine.objects.get(pk=self.pk)
-                    except JournalLine.DoesNotExist:
-                        # unlikely, but be safe
-                        raise ValidationError(
-                            "Cannot modify JournalLine: "
-                            "parent JournalEntry is posted."
+                    # comparing to original will still be done below, but short-circuit for speed
+                    orig = JournalLine.objects.filter(pk=self.pk).first()
+                    if orig:
+                        changed = (
+                            orig.debit_original != self.debit_original
+                            or orig.credit_original != self.credit_original
+                            or orig.account_id != (self.account.id if self.account else None)
+                            or orig.invoice_id != (self.invoice.id if self.invoice else None)
                         )
-                    # decide which fields
-                    # constitute a "modification" for your domain:
-                    changed = (
-                        orig.debit_original != self.debit_original
-                        or orig.credit_original != self.credit_original
-                        or orig.account_id
-                        != (self.account.id if self.account else None)
-                        or orig.invoice_id
-                        != (self.invoice.id if self.invoice else None)
-                        or orig.bill_id !=
-                        (self.bill.id if self.bill else None)
-                    )
-                    if changed:
-                        raise ValidationError(
-                            "Cannot modify JournalLine: "
-                            "parent JournalEntry is posted."
-                        )
+                        if changed:
+                            raise ValidationError("Cannot modify JournalLine: parent JournalEntry is posted.")
+                    else:
+                        # weird state: no orig found but journal is posted → block
+                        raise ValidationError("Cannot modify JournalLine: parent JournalEntry is posted.")
                 else:
-                    # Trying to create a line on a posted journal — block it.
-                    raise ValidationError(
-                        "Cannot add JournalLine: parent journal is posted."
-                    )
+                    # creating a new line under a posted journal
+                    raise ValidationError("Cannot add JournalLine: parent journal is posted.")
+                
+            # Ensure no negative values sneak in
+            # (redundant with CheckConstraint but useful at app-level)
+            if self.debit_original < 0 or self.credit_original < 0:
+                raise ValidationError("Debit and credit must be >= 0")
 
+            # ensure debit xor credit or both allowed?
+            # Usually one is zero.
+            if (self.debit_original > 0) and (self.credit_original > 0):
+                raise ValidationError(
+                    "JournalLine should not have both debit and credit > 0"
+                )
+            if (self.debit_original == 0) and (self.credit_original == 0):
+                raise ValidationError(
+                    "JournalLine requires a non-0 amount on either debit or credit"
+                )
+
+            # Derive effective company_id safely 
+            company_id = getattr(self, "company_id", None)
+
+            # If inline has journal_id (JE saved), query it
+            if company_id is None and getattr(self, "journal_id", None):
+                company_id = JournalEntry.objects.only("company_id").filter(pk=self.journal_id).values_list("company_id", flat=True).first()
+
+            # If JE is present but unsaved, maybe form set journal.company already
+            if company_id is None and getattr(self, "journal", None):
+                company_id = getattr(self.journal, "company_id", None) or (self.journal.company.id if getattr(self.journal, "company", None) else None)
+
+            # Enforce cross company checks only if company_id available
+            if self.account and company_id is not None and self.account.company_id != company_id:
+                raise ValidationError("JournalLine.account must belong to the same company.")
+
+            # If company_id is still None, company-based checks are skipped for now.
+            # They will be enforced later in save() when we can copy company from parent.
+
+            # Invoice and Bill cannot both be set
+            # A journal line can link to either an invoice or a bill,
+            # but never both
+            if self.invoice and self.bill:
+                raise ValidationError(
+                    "JournalLine cannot reference " "both invoice and bill."
+                )
+
+            # Company consistency
+            # Every line must belong to same company as its parent journal
+            if self.journal_id and self.company_id != self.journal.company_id:
+                raise ValidationError(
+                    "JournalLine.company must" " equal JournalEntry.company"
+                )
+            
+            # Ensure invoice chosen belongs to the same company
+            if self.invoice_id and self.invoice.company_id != self.company_id:
+                raise ValidationError(
+                    "JournalLine.invoice must belong to the same company."
+                )
+            # Ensure bill chosen belongs to the same company
+            if self.bill_id and self.bill.company_id != self.company_id:
+                raise ValidationError(
+                    "JournalLine.bill must " "belong to the same company."
+                )       
+            # Ensure bank transaction chosen belongs to the same company
+            bt = self.bank_transaction
+            if bt and bt.company_id != self.company_id:
+                raise ValidationError(
+                    "JournalLine.bank_transaction must belong to the same company."
+                )
+            # Ensure fixed asset chosen belongs to the same company
+            if self.fixed_asset_id and self.fixed_asset.company_id != self.company_id:
+                raise ValidationError(
+                    "JournalLine.fixed_asset must belong to the same company."
+                )
+
+            # Check if an Invoice/Bill/Asset
+            # references a non-control account → block it
+            if self.invoice_id and not self.account.is_control_account:
+                raise ValidationError(
+                    "Invoice postings must " "use a control AR account.")
+            if self.bill_id and not self.account.is_control_account:
+                raise ValidationError(
+                    "Bill postings must " "use a control AP account.")
+            if self.fixed_asset_id and not self.account.is_control_account:
+                raise ValidationError(
+                    "Fixed asset postings " "must use a control account.")
+
+            # Check if fx_rate valid
+            if self.currency_id != self.journal.company.default_currency_id:
+                if self.fx_rate is None or self.fx_rate <= 0:
+                    raise ValidationError(
+                        "fx_rate must be > 0 " "when currency differs")
+            elif self.fx_rate not in (None, 1.0):
+                raise ValidationError(
+                    "fx_rate must be None " "or 1.0 for default currency")
+    
     def delete(self, *args, **kwargs):
         # Prevent deletion if parent journal is posted
         if self.journal_id:
@@ -621,7 +604,6 @@ class JournalLine(models.Model):  # Stores Lines ( credits / debits )
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
 
-        # clean()+field validation always run whenever
-        # you save a JournalLine programmatically
+        # clean() + field validation always run when saving a JournalLine programmatically
         self.full_clean()
         return super().save(*args, **kwargs)
