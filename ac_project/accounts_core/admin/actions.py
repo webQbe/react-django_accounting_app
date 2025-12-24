@@ -61,6 +61,15 @@ def post_journal_entries(
         level=messages.SUCCESS if failures == 0 else messages.WARNING,
     )
 
+    # Set user
+    for je in queryset:
+        try:
+            je.post(user=request.user)    # ensure user is passed
+            modeladmin.message_user(request, f"Posted JE {je.pk}")
+        except Exception as e:
+            modeladmin.message_user(request, f"Failed to post JE {je.pk}: {e}", level=messages.ERROR)
+
+
 # how it will show in the admin UI
 post_journal_entries.short_description = _("Post selected journal entries (make immutable)")
 

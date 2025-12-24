@@ -55,11 +55,24 @@ class BankTransactionAdmin(TenantAdminMixin, admin.ModelAdmin):
             "banktransactioninvoice_set__invoice",  # all invoices for each BT
             "banktransactionbill_set__bill",  # all bills for each BT
         )
-    """
-        When you load invoices/bills for each bank transaction,
-        also grab linked Invoice/Bill row at the same time.
-    """
+        """
+            When you load invoices/bills for each bank transaction,
+            also grab linked Invoice/Bill row at the same time.
+        """
 
+    # Set user
+    def save_formset(self, request, form, formset, change):
+        instances = formset.save(commit=False)
+        for inst in instances:
+            # If it's the link row that triggers apply_payment_to_invoice
+            if isinstance(inst, BankTransactionInvoice):
+                inst._applied_by_user = request.user   # your model reads this
+            inst.save()
+        formset.save_m2m()
+        """ 
+          BankTransactionInvoice.save() calls apply_payment_to_invoice(self, user=getattr(self, '_applied_by_user', None)). 
+          That _applied_by_user must be set by the admin before save().
+        """
 
 # Register `BankTransactionInvoice` model
 @admin.register(BankTransactionInvoice)

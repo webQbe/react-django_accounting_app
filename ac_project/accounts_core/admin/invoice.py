@@ -5,6 +5,7 @@ from django.urls import path
 from django.shortcuts import get_object_or_404, redirect
 from accounts_core.models import Customer, Invoice, InvoiceLine
 from ..services.update import open_invoice
+from ..services.audit_helper import log_action
 from .actions import mark_inv_as_open, mark_inv_as_paid
 from .inlines import InvoiceLineInline
 from .mixins import TenantAdminMixin
@@ -111,6 +112,16 @@ class InvoiceAdmin(TenantAdminMixin, admin.ModelAdmin):
             return False  # removes “Delete” option from admin for that invoice
         return super().has_delete_permission(request, obj)
 
+    """ Set user by passing request.user explicitly """
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        # record update/create with explicit user
+        log_action(
+                action="update" if change else "create", 
+                instance=obj, 
+                user=request.user, 
+                changes={"total": str(obj.total)}
+            )
 
 # Register `InvoiceLine` model
 @admin.register(InvoiceLine)
