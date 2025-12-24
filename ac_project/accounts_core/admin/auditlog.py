@@ -1,13 +1,12 @@
 from django.contrib import admin
-
 from accounts_core.models import AuditLog
-
 from .mixins import TenantAdminMixin
+from .ReadOnly import ReadOnlyAdmin
 
 
 # Register `AuditLog` model
 @admin.register(AuditLog)
-class AuditLogAdmin(TenantAdminMixin, admin.ModelAdmin):
+class AuditLogAdmin(TenantAdminMixin, ReadOnlyAdmin):
     list_display = (
         "id",
         "company",

@@ -17,3 +17,4 @@ from .journal import JournalEntryAdmin, JournalLineAdmin
 from .membership import CompanyAdmin, EntityMembershipAdmin, UserAdmin
 from .mixins import TenantAdminMixin
 from .period import PeriodAdmin
+from .matviews import JournalLineAggPeriodAdmin, TrialBalancePeriodAdmin, TrialBalanceRunningAdmin, ProfitLossPeriodAdmin, BalanceSheetRunningAdmin

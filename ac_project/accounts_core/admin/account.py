@@ -2,6 +2,7 @@ from django.contrib import admin
 from accounts_core.models import (Account, AccountBalanceSnapshot,
                                   AccountCategory)
 from .mixins import TenantAdminMixin
+from .ReadOnly import ReadOnlyAdmin
 
 
 # Register `Account` model
@@ -67,7 +68,7 @@ class AccountCategoryAdmin(TenantAdminMixin, admin.ModelAdmin):
 
 # Register `AccountBalanceSnapshot` model
 @admin.register(AccountBalanceSnapshot)
-class AccountBalanceSnapshotAdmin(TenantAdminMixin, admin.ModelAdmin):
+class AccountBalanceSnapshotAdmin(TenantAdminMixin, ReadOnlyAdmin):
     list_display = (
         "id",
         "company",
