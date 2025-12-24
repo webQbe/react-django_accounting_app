@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("accounts_core", "0024_alter_fixedasset_account"),
+        ("accounts_core", "0029_alter_fixedasset_account"),
     ]
 
     operations = [

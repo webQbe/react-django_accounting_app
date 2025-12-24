@@ -40,7 +40,7 @@ class Migration(migrations.Migration):
             CREATE UNIQUE INDEX ux_mv_trial_balance_running_company_account
                 ON mv_trial_balance_running (company_id, account_id);
             """,
-            reverse_sql="DROP MATERIALIZED VIEW mv_trial_balance_running;",
+            reverse_sql="",
         ),
     ]
 

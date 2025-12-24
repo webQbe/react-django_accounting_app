@@ -35,7 +35,7 @@ class Migration(migrations.Migration):
                 CREATE UNIQUE INDEX ux_mv_pl_period_company_period
                     ON mv_pl_period (company_id, period_id);
                 """,
-            reverse_sql="DROP MATERIALIZED VIEW mv_pl_period;",
+            reverse_sql="",
         ),
     ]
 

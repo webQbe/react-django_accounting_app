@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("accounts_core", "0023_alter_invoice_status"),
+        ("accounts_core", "0028_alter_invoice_status"),
     ]
 
     operations = [

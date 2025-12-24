@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("accounts_core", "0015_backfill_journalline_currency"),
+        ("accounts_core", "0020_backfill_journalline_currency"),
     ]
 
     operations = [
@@ -239,11 +239,6 @@ class Migration(migrations.Migration):
                 "db_table": "mv_trial_balance_running",
                 "managed": False,
             },
-        ),
-        migrations.AddField(
-            model_name="journalentry",
-            name="posting_fingerprint",
-            field=models.CharField(blank=True, max_length=64, null=True),
         ),
         migrations.AlterField(
             model_name="journalentry",

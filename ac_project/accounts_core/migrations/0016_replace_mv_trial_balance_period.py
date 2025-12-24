@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("accounts_core", "0010_update_mv_jl_agg_period"),
+        ("accounts_core", "0015_replace_update_mv_jl_agg_period"),
     ]
 
     """ Trial Balance (period-based): 
@@ -18,6 +18,7 @@ class Migration(migrations.Migration):
             """
             CREATE MATERIALIZED VIEW mv_trial_balance_period AS
             SELECT
+                md5(m.company_id::text || '-' || COALESCE(m.period_id::text, '') || '-' || m.account_id::text) AS id,
                 m.company_id,
                 m.period_id,
                 m.account_id,
@@ -41,13 +42,7 @@ class Migration(migrations.Migration):
         ),
     ]
 
-    """ SQL schema definition:
-         - Creates a new stored query (materialized view) called mv_trial_balance_period.
-         - Uses the previously created base aggregation matview as the source.
-            - m is an alias for shorthand.
-         - Aggregates totals per account per company per period in original & local currencies:
-         - Groups rows so that the sums are calculated per company, period, and account.
-         - Index creation
-            - Adds a unique index so each (company, period, account) combination appears only once.
-            - Speeds up queries filtering by company, period, or account.
+    """ Version 0016:
+        - Adds deterministic PK:
+            `md5(company_id || '-' || period_id || '-' || account_id) AS id`
     """

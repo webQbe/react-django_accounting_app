@@ -45,7 +45,7 @@ class Migration(migrations.Migration):
                 ON mv_jl_agg_period (company_id, account_id);
             """,
             # SQL to undo view if you roll back migration (dropping the view)
-            reverse_sql="DROP MATERIALIZED VIEW mv_jl_agg_period;",
+            reverse_sql="",
         ),
     ]
 

@@ -732,6 +732,12 @@ class Migration(migrations.Migration):
                         to="accounts_core.account",
                     ),
                 ),
+                (
+                    "default_unit_price",
+                     models.DecimalField(
+                        decimal_places=4, default=Decimal("0.0"), max_digits=18
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(

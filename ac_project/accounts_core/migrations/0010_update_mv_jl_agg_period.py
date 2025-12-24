@@ -67,34 +67,14 @@ class Migration(migrations.Migration):
                 ON mv_jl_agg_period (company_id, account_id);
             """,
             # SQL to undo view if you roll back migration (dropping the view)
-            reverse_sql="DROP MATERIALIZED VIEW mv_jl_agg_period;",
+            reverse_sql="",
         ),
     ]
 
-    """ SQL schema definition:
-            - Builds a summarized “reporting table” called mv_jl_agg_period 
-            - Aggregates journal entries by company, period, and account
-                - jl.company_id: Which tenant/company the journal line belongs to.
-                - je.period_id: The accounting period (e.g. Jan 2025).
-                - je.date::date AS last_txn_date: The date of the journal entry, cast to a pure date (without time).
-                - a.id, a.code, a.name, a.ac_type: Identifiers and properties of the account.
-                - Total debits and credits across lines.
-                - Each row is multiplied by its FX rate (or 1.0 if NULL).
-                - Calculates the net effect (like a balance) for that account in that period.
-
-            - Each line knows which entry it belongs to and which account it affects
-                - Start from journalline (the detailed lines)
-                - Join with journalentry (the header/transaction info).
-                - Join with account (to get account details).
-            
-            - Only include posted journal entries (finalized)
-
-            - One row per account per period per company
-                - Groups all rows by company + period + account + transaction date
-                - For each group, it calculates the sums
-
-            - Indexes
-                - First index enforces uniqueness: you can’t have two rows for the same (company, period, account).
-                - Second index is for fast lookups when filtering by company and account 
-                  (e.g., “show me this account’s history for a company”).
-        """
+    """ Version 0010_update_mv_jl_agg_period (WITH + fx_rate)
+       - Improvements over 0008
+        - Correct aggregation grain: One row per (company, period, account)
+        - MAX(txn_date) instead of grouping by date
+        - FX normalization (fx_rate)
+        - Cleaner structure     
+    """

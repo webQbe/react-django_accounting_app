@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
     dependencies = [
         (
             "accounts_core",
-            "0014_mv_balance_sheet_running",
+            "0019_replace_mv_balance_sheet_running",
         ),  # adjust if your last migration has a different name
     ]
 

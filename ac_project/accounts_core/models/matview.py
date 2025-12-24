@@ -7,6 +7,7 @@ from django.db import models
 
 class JournalLineAggPeriod(models.Model):
     # Field types must line up with materialized view’s columns
+    id = models.CharField(max_length=32, primary_key=True) # set id as primary key
     company_id = models.IntegerField()
     period_id = models.IntegerField()
     last_txn_date = models.DateField()
@@ -40,6 +41,7 @@ class JournalLineAggPeriod(models.Model):
 
 
 class TrialBalancePeriod(models.Model):
+    id = models.CharField(max_length=32, primary_key=True) # set id as primary key
     company_id = models.IntegerField()
     period_id = models.IntegerField()
     account_id = models.IntegerField()
@@ -73,6 +75,7 @@ class TrialBalancePeriod(models.Model):
 
 
 class TrialBalanceRunning(models.Model):
+    id = models.CharField(max_length=32, primary_key=True) # set id as primary key
     company_id = models.IntegerField()
     account_id = models.IntegerField()
     account_code = models.CharField(max_length=50)
@@ -108,6 +111,7 @@ class TrialBalanceRunning(models.Model):
 
 
 class ProfitLossPeriod(models.Model):
+    id = models.CharField(max_length=32, primary_key=True) # set id as primary key
     company_id = models.IntegerField()
     period_id = models.IntegerField()
     total_income_original = models.DecimalField(
@@ -136,6 +140,7 @@ class ProfitLossPeriod(models.Model):
 
 
 class BalanceSheetRunning(models.Model):
+    id = models.CharField(max_length=32, primary_key=True) # set id as primary key
     company_id = models.IntegerField()
     account_id = models.IntegerField()
     account_code = models.CharField(max_length=50)
