@@ -1,7 +1,32 @@
 services:
-  db:
-    image: postgres:15
-    environment:
+  db: # PostgreSQL
+    image: postgres:15      # Run PostgreSQL 15
+    restart: unless-stopped 
+    env_file: .env          # Read credentials from .env
+    environment:            # Create the database once (on first startup only)
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      # Your database lives outside the container                
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_HOST_PORT:-5432}:5432"     # set DB_HOST_PORT=5432 (or 5433 to avoid conflicts)
+
+  web:  # Django Application
+      build:
+        context: .
+        dockerfile: Dockerfile                          # Build Django image from Dockerfile
+      command: >
+        sh -c "python manage.py runserver 0.0.0.0:8000" # overrides entrypoint.sh completely
+      volumes:
+        - .:/app:delegated                              # Live code reload
+      working_dir: /app
+      env_file: .env
+      depends_on:
+        - db
+      ports:
+        - "8000:8000"
+
+volumes:
+  postgres_data:
