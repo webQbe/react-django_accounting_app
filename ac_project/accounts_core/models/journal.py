@@ -13,6 +13,7 @@ from .currency import Currency
 from .entitymembership import Company
 from .period import Period
 from ..services.audit_helper import log_action
+from ..services.periods import resolve_period
 
 JOURNAL_STATUS = [
     ("draft", "Draft"),  # still editable
@@ -207,6 +208,14 @@ class JournalEntry(models.Model):  # Represents one accounting transaction
             raise AlreadyPostedDifferentPayload(
                 "Journal already posted with different payload."
             )
+        
+        # Resolve and lock the accounting period
+        if not je.date:
+            raise ValidationError("JournalEntry must have a date before posting")
+        
+        if je.period_id is None:
+            # Posting date determines the period
+            je.period = resolve_period(je.company, je.date)
 
         """ Update state """
         je.status = "posted"  # Mark journal as posted
@@ -216,7 +225,7 @@ class JournalEntry(models.Model):  # Represents one accounting transaction
         je.posting_fingerprint = fp
         je.save(
             update_fields=[
-                "status", "posted_at", "created_by", "posting_fingerprint"]
+                "status","period", "posted_at", "created_by", "posting_fingerprint"]
         )
 
         # Log JournalEntry posting
