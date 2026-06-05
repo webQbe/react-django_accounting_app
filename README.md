@@ -1,199 +1,177 @@
-# Accounting Web App - Contributing Guide
+# Accounting Web App
 
-A production-ready backend for accounting web app built with Django. Implements **double-entry bookkeeping**, **tenant isolation**, **invoices/bills**, **bank transactions**, **fixed-asset depreciation** and **reporting** *(trial balance, income statement, balance sheet, cashflow, AR/AP aging)*. Includes **admin UI** for **rapid prototyping** and **materialized views** for fast reporting.
+> A production-ready Django backend implementing double-entry bookkeeping, multi-tenant isolation, and financial reporting — built from scratch as a learning project.
 
+---
 
-## About
-Built from scratch using concepts learned from various tutorials:
-- Accounting fundamentals: 
-  - [*Principles of Accounting*](https://alison.com/course/principles-of-accounting)
-  - [*Introduction to Business Accounting*](https://alison.com/course/introduction-to-business-accounting)
-  - [*Cost Accounting & Classification*](https://alison.com/course/introduction-to-cost-accounting-and-cost-classification)
-  - [*Basic Concepts of Financial Analysis*](https://alison.com/course/fundamental-concepts-of-financial-analysis)
--  Product research: 
-    - [*QuickBooks Online*](https://www.youtube.com/@quickbooks) & [*Xero*](https://www.youtube.com/@xero) feature walkthroughs
-- Schema & prototyping: 
-  - [*How to Create Accounting Database in MS Access (Professional)*](https://www.youtube.com/watch?v=0zcYwFU5OKE)
-- Databases & multi-tenant: 
-  - [*Advanced Diploma in Database Systems (modules 1–8)*](https://alison.com/course/advanced-diploma-in-database-systems)
-  - [*Multi-Tenant SaaS Architecture in 3 Simple Steps*](https://www.youtube.com/watch?v=bFLGwVyIotA)
+## What problem does it solve?
 
-This is my implementation and learning exercise — credit given above.
+Small business accounting software (QuickBooks, Xero) is powerful but opaque — it's hard to understand *how* the underlying accounting actually works. This project is a ground-up implementation of core accounting mechanics, designed to be readable, testable, and extensible.
 
-## What to look at
-- `admin/` — registered models
-- `management/commands/` — demo data management commands
-- `tests/` — automated tests
+It handles the workflows a real accounting backend needs:
 
+- **Double-entry bookkeeping** — every transaction debits one account and credits another, keeping books balanced
+- **Invoices & bills** — with validation rules (no negative totals, no deleting invoices with payments attached)
+- **Bank transactions** — record and reconcile payments in and out
+- **Fixed-asset depreciation** — track asset value over time
+- **Financial reports** — trial balance, income statement, balance sheet, cash flow, AR/AP aging
+- **Multi-tenant isolation** — each company's data is fully separated
+- **Admin UI** — rapid prototyping and data inspection without building a frontend first
+- **Materialized views** — fast report queries even as data grows
 
-## Database Design
+---
 
-The following ER diagram illustrates the relationships between the models:
+## Technologies used
 
-![ER Diagram](MVP_logical.drawio.png)
+| Layer | Technology |
+|---|---|
+| Backend framework | Django (Python 3.12) |
+| Database | PostgreSQL 15 (via Docker) |
+| Testing | pytest |
+| Code quality | black · isort · flake8 |
+| Admin UI | Django Admin |
+| Containerization | Docker |
 
-## Getting Started
+---
 
-### Create & Activate Virtual Environment
+## How does it work?
 
-1. **Clone the repo**
-    ```bash
-    git clone https://github.com/webQbe/react-django_accounting_app.git
-    ```
+The app is structured around a set of core accounting models — `Company`, `Account`, `JournalEntry`, `Invoice`, `Bill`, `BankTransaction`, and `FixedAsset` — with strict validation baked into the model layer via `clean()` and `save()` overrides.
 
-2. **Navigate to your project directory**:
+**Multi-tenancy** is enforced at the model level: every record is scoped to a `Company`, so queries across tenants are structurally prevented.
 
-   ```bash
-   cd react-django_accounting_app
-   ```
+**Double-entry integrity** is enforced on every journal entry — debits must equal credits, or the transaction is rejected before it touches the database.
 
-3. **Create a virtual environment**:
+**Reports** are powered by PostgreSQL materialized views, which pre-aggregate the ledger so report queries stay fast without denormalizing the source data.
 
-   ```bash
-   python3.12 -m venv .venv
-   ```
+The best places to explore the codebase:
 
-   This will create a `.venv` directory in your project folder.
+- `admin/` — all registered models, good for understanding the data shape
+- `management/commands/` — demo data scripts showing how records relate to each other
+- `tests/` — lifecycle tests (e.g. `test_invoice_lifecycle.py`) that document the rules enforced at each step
 
-4. **Activate the virtual environment**:
+---
 
-   * On **Linux/macOS**:
+## Screenshots
 
-     ```bash
-     source .venv/bin/activate
-     ```
+### Django Admin dashboard showing registered models
+![Registered models in Django Admin](images/models.png)
 
-   * On **Windows**:
+### Invoice creation form with validation in action
+![Invoice creation form](images/invoice-validation.png)
 
-     ```bash
-     .venv\Scripts\Activate.ps1
-     ```
+### ER diagram 
+![ER diagram](images/MVP_logical.drawio.png)
 
-   After activation, your prompt should change to indicate the active environment, 
-   e.g., `(.venv)`.
+---
 
+## Demo video
+<a href="https://youtu.be/JtRCgn8WaEs">
+  <img src="./images/acc-backend-thumb.png" alt="Watch the video (Opens in YouTube)" width="560" />
+</a>
 
-5. Install dependencies (Python packages):  
-  ```bash
-  pip install -r requirements.txt
-  ```
+---
 
-6. Install Database: PostgreSQL (via Docker)
-  ```bash
-  docker run --name ac-postgres -e POSTGRES_PASSWORD=secret -p 5432:5432 -d postgres:15
-  ```
+## Quick start
 
-### Try it out on Django Admin
-1. Start the postgres db server
-Run:
-```bash
-  docker start ac-postgres
-```
-2. Create superuser:
-```bash
-  python manage.py createsuperuser
-```
-3. Start the dev server
-Run:
-```bash
-  python manage.py runserver
-```
-4. Log into Admin:
-    - Open `http://127.0.0.1:8000/admin/`
-    - Log in with the superuser you just created.
-    - You should see all the models you registered in `admin.py`.
-5. Create a Company
-6. Add a Currency
-7. Add a Customer tied to that company.
-8. Try creating an Invoice — `clean()` and `save()` methods will enforce rules 
-  *(e.g., no negative totals, no deleting invoices with payments, etc.).*
+### Prerequisites
+- Python 3.12
+- Docker (for PostgreSQL)
 
-
-### Demo Data
-To populate the database with a demo company and user:
+### 1. Clone and set up environment
 
 ```bash
-    make demo
+git clone https://github.com/webQbe/react-django_accounting_app.git
+cd react-django_accounting_app
+
+python3.12 -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\Activate.ps1
+
+pip install -r requirements.txt
 ```
 
-This creates:
-- Company: Demo Ltd
-- User: demo / demo123
-- Sample accounts, invoices, journal entries, bank transactions
-
-
-### Running Tests
-
-* Run the full test suite:
-
-  ```bash
-  pytest
-  ```
-* Run a specific test file:
-
-  ```bash
-  pytest accounts_core/tests/test_invoice_lifecycle.py
-  ```
-
-### Code Quality
-
-* Format code:
-
-  ```bash
-  black .
-  ```
-* Sort imports:
-
-  ```bash
-  isort .
-  ```
-* Run linter:
-
-  ```bash
-  flake8 .
-  ```
-
-
-### Database: Backup, Reset, and Migrations
-
-### Backup
-
-* **Development DB (SQLite / Postgres local):**
-
-  ```bash
-      # Postgres (local)
-      pg_dump -U <username> acdb > backup.sql
-
-      # If using Docker
-      docker exec -t ac-postgres pg_dump -U <username> acdb > backup.sql
-  ```
-
-### Resetting the Database
-
-Use this if you need a fresh start in development (⚠️ will delete all data).
+### 2. Start the database
 
 ```bash
-# Drop all tables and recreate from migrations
-python manage.py flush     # resets data, keeps schema
+docker run --name ac-postgres -e POSTGRES_PASSWORD=secret -p 5432:5432 -d postgres:15
 ```
 
-### Applying Migrations
+### 3. Run migrations and create a superuser
 
 ```bash
-# Make new migrations after model changes
-python manage.py makemigrations
-
-# Apply migrations
 python manage.py migrate
+python manage.py createsuperuser
 ```
 
-### Rolling Back a Migration
+### 4. (Optional) Load demo data
 
 ```bash
-# Migrate to a previous state (e.g., app_name to migration 0005)
+make demo
+```
+
+Creates a **Demo Ltd** company with a demo user (`demo` / `demo123`), sample accounts, invoices, journal entries, and bank transactions — ready to explore immediately.
+
+### 5. Start the dev server
+
+```bash
+python manage.py runserver
+```
+
+Open `http://127.0.0.1:8000/admin/` and log in. Try creating an Invoice — validation rules (`clean()` and `save()`) will fire automatically.
+
+---
+
+## Running tests
+
+```bash
+# Full test suite
+pytest
+
+# Single file
+pytest accounts_core/tests/test_invoice_lifecycle.py
+```
+
+---
+
+## Code quality
+
+```bash
+black .      # format
+isort .      # sort imports
+flake8 .     # lint
+```
+
+---
+
+## Database operations
+
+```bash
+# Backup (Docker Postgres)
+docker exec -t ac-postgres pg_dump -U postgres acdb > backup.sql
+
+# Reset data (keeps schema)
+python manage.py flush
+
+# Migrations
+python manage.py makemigrations
+python manage.py migrate
+
+# Roll back to a specific migration
 python manage.py migrate app_name 0005
 ```
 
+---
+
+## Learning references
+
+Built from scratch using:
+- Accounting fundamentals — [Principles of Accounting](https://alison.com/course/principles-of-accounting), [Introduction to Business Accounting](https://alison.com/course/introduction-to-business-accounting)
+- Product research — [QuickBooks](https://www.youtube.com/@quickbooks) & [Xero](https://www.youtube.com/@xero) feature walkthroughs
+- Multi-tenant architecture — [Multi-Tenant SaaS in 3 Simple Steps](https://www.youtube.com/watch?v=bFLGwVyIotA)
+- Database design — [Advanced Diploma in Database Systems](https://alison.com/course/advanced-diploma-in-database-systems)
+
+---
 
 ## License
+
 MIT
