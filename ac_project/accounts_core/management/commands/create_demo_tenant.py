@@ -1,4 +1,5 @@
 import datetime
+from datetime import date
 from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
@@ -6,9 +7,10 @@ from django.db import transaction
 from django.utils.text import slugify
 from accounts_core.models import (Account, BankAccount, BankTransaction,
                                   Company, Currency, Customer, Invoice,
-                                  JournalEntry, JournalLine)
+                                  JournalEntry, JournalLine, Period)
 
 User = get_user_model()
+today = date.today()
 
 
 class Command(BaseCommand):
@@ -225,6 +227,22 @@ class Command(BaseCommand):
             debit_original=Decimal("0.00"),
             credit_original=Decimal("1000.00"),
         )
+
+        # Create an open accounting period before posting the journal.
+        period, _ = Period.objects.get_or_create(
+        company=company,
+        name=str(today.year),
+        defaults={
+            "start_date": date(today.year, 1, 1),
+            "end_date": date(today.year, 12, 31),
+            "is_closed": False,
+            },
+        )
+
+        self.stdout.write(
+            self.style.SUCCESS(f"Created period: {period}")
+        )
+        
         journal.post()
 
         self.stdout.write(self.style.SUCCESS(
